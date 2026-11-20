@@ -1,0 +1,39 @@
+{
+  "model_name": "risk_assessment",
+  "features": [
+    "priorityId",
+    "urgencyId",
+    "impactId",
+    "isClientService",
+    "hasCriticalKeywords"
+  ],
+  "weights": [
+    [
+      2.6110625498571696,
+      2.0371018880649174,
+      2.0371018880649188,
+      0.8375092705866367,
+      0.8375092705866363
+    ]
+  ],
+  "intercept": [
+    -23.515693165331555
+  ],
+  "classes": [
+    0,
+    1
+  ],
+  "critical_keywords": [
+    "отказ",
+    "авария",
+    "массовый",
+    "недоступен",
+    "падение",
+    "критический",
+    "срочно",
+    "блок",
+    "dead",
+    "fatal",
+    "outage"
+  ]
+}
