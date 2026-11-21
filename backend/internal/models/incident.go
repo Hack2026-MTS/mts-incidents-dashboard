@@ -60,6 +60,13 @@ type Incident struct {
 	AIRoutingConfidence float64      `json:"aiRoutingConfidence"`
 	AIRoutingTop        []GroupScore `json:"aiRoutingTop,omitempty"`
 
+	// Predictive SLA & Workload Analysis
+	AISLARisk           float64 `json:"aiSlaRisk"`
+	AISLALevel          string  `json:"aiSlaLevel"` // "SAFE", "WARNING", "CRITICAL"
+	AITeamWorkload      int     `json:"aiTeamWorkload"`
+	AIEstimatedMinutes  int     `json:"aiEstimatedMinutes"`
+	AISLAMarginMinutes  int     `json:"aiSlaMarginMinutes"`
+
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -86,4 +93,5 @@ type DashboardStats struct {
 	UnderInvestigation   int `json:"underInvestigation"`   // state == "Исследование ситуации"
 	Active               int `json:"active"`               // state != "Завершен" && state != "Закрыт"
 	Resolved             int `json:"resolved"`             // state == "Завершен" || state == "Закрыт"
+	SLARiskCount         int `json:"slaRiskCount"`         // aiSlaRisk >= 50% and active
 }

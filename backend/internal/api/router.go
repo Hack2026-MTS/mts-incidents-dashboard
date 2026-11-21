@@ -48,6 +48,8 @@ func SetupRouter(db *database.DB) *chi.Mux {
 		api.Get("/incidents", incidentHandler.GetIncidents)
 		api.Post("/incidents", incidentHandler.CreateIncident)
 		api.Get("/incidents/{id}", incidentHandler.GetIncidentByID)
+		api.Get("/incidents/{id}/events", incidentHandler.GetIncidentEvents)
+		api.Get("/incidents/{id}/predictions", incidentHandler.GetIncidentPredictions)
 		api.Put("/incidents/{id}", incidentHandler.UpdateIncident)
 
 		// Demo scenario helpers

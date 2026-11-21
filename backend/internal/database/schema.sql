@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS incidents (
     ai_risk_level VARCHAR(32) DEFAULT 'LOW',
     ai_routing_hint TEXT DEFAULT '',
     ai_routing_confidence DOUBLE PRECISION DEFAULT 0.0,
+    ai_sla_risk DOUBLE PRECISION DEFAULT 0.0,
+    ai_sla_level VARCHAR(32) DEFAULT 'SAFE',
+    ai_team_workload INT DEFAULT 0,
+    ai_estimated_minutes INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -58,3 +62,22 @@ CREATE TABLE IF NOT EXISTS incident_events (
 
 CREATE INDEX IF NOT EXISTS idx_events_incident_id ON incident_events (incident_id);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON incident_events (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_predictions (
+    id SERIAL PRIMARY KEY,
+    incident_id VARCHAR(64) NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+    predicted_group VARCHAR(255),
+    confidence DOUBLE PRECISION,
+    top_candidates JSONB,
+    predicted_risk_score DOUBLE PRECISION,
+    predicted_risk_level VARCHAR(32),
+    actual_group VARCHAR(255),
+    is_accepted BOOLEAN,
+    input_features JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    evaluated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_predictions_incident_id ON ai_predictions (incident_id);
+CREATE INDEX IF NOT EXISTS idx_ai_predictions_created_at ON ai_predictions (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_predictions_is_accepted ON ai_predictions (is_accepted);

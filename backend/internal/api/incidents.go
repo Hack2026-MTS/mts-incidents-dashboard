@@ -105,6 +105,16 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 	// Fetch enriched incident
 	saved, _ := h.db.GetIncidentByID(inc.ID)
 
+	// Record AI Prediction for MLOps tracking
+	_ = h.db.RecordAIPrediction(saved)
+
+	// Record audit event
+	_ = h.db.RecordEvent(saved.ID, "CREATED", "Инцидент зарегистрирован в системе", map[string]any{
+		"priority": saved.Priority,
+		"group":    saved.AssignedGroupName,
+		"risk":     saved.AIRiskScore,
+	})
+
 	// Broadcast SSE
 	h.sseHub.BroadcastEvent("INCIDENT_CREATED", saved, "Новый инцидент зарегистрирован: "+saved.ID)
 
@@ -112,6 +122,11 @@ func (h *IncidentHandler) CreateIncident(w http.ResponseWriter, r *http.Request)
 		h.sseHub.BroadcastEvent("CRITICAL_ALERT", saved, "🚨 КРИТИЧЕСКИЙ ИНЦИДЕНТ: "+saved.Header)
 	}
 	if saved.AssignedGroupName == "КЦ ИТ Координаторы Массовых Инцидентов" {
+		_ = h.db.RecordEvent(saved.ID, "AI_ROUTING_RECOMMENDED", "ИИ рекомендовал передать в: "+saved.AIRoutingHint, map[string]any{
+			"recommended_group": saved.AIRoutingHint,
+			"confidence":        saved.AIRoutingConfidence,
+			"risk_score":        saved.AIRiskScore,
+		})
 		h.sseHub.BroadcastEvent("COORDINATOR_ALERT", saved, "👤 Инцидент назначен на координаторов: "+saved.ID)
 	}
 
@@ -135,6 +150,9 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Merge updates
+	oldGroup := existing.AssignedGroupName
+	oldState := existing.State
+
 	if updateData.State != "" {
 		existing.State = updateData.State
 	}
@@ -162,12 +180,33 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 
 	saved, _ := h.db.GetIncidentByID(id)
 
+	// Record audit events for changes
+	if existing.AssignedGroupName != oldGroup {
+		_ = h.db.RecordEvent(id, "REASSIGNED", "Перенаправлен в команду: "+existing.AssignedGroupName, map[string]string{
+			"from": oldGroup,
+			"to":   existing.AssignedGroupName,
+		})
+		// Record feedback for ML evaluation in ai_predictions
+		_ = h.db.UpdateAIPredictionFeedback(id, existing.AssignedGroupName)
+	}
+	if existing.State != oldState {
+		_ = h.db.RecordEvent(id, "STATE_CHANGED", "Статус изменен на: "+existing.State, map[string]string{
+			"old": oldState,
+			"new": existing.State,
+		})
+	}
+
 	h.sseHub.BroadcastEvent("INCIDENT_UPDATED", saved, "Обновлен статус инцидента: "+saved.ID)
 
 	if saved.PriorityID == 4 || saved.Priority == "Наивысший" {
 		h.sseHub.BroadcastEvent("CRITICAL_ALERT", saved, "🚨 Эскалация в КРИТИЧЕСКИЙ: "+saved.Header)
 	}
 	if saved.AssignedGroupName == "КЦ ИТ Координаторы Массовых Инцидентов" {
+		_ = h.db.RecordEvent(saved.ID, "AI_ROUTING_RECOMMENDED", "ИИ рекомендовал передать в: "+saved.AIRoutingHint, map[string]any{
+			"recommended_group": saved.AIRoutingHint,
+			"confidence":        saved.AIRoutingConfidence,
+			"risk_score":        saved.AIRiskScore,
+		})
 		h.sseHub.BroadcastEvent("COORDINATOR_ALERT", saved, "👤 Передан координаторам: "+saved.ID)
 	}
 
@@ -184,4 +223,28 @@ func (h *IncidentHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+func (h *IncidentHandler) GetIncidentEvents(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	events, err := h.db.GetEventsForIncident(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(events)
+}
+
+func (h *IncidentHandler) GetIncidentPredictions(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	preds, err := h.db.GetAIPredictions(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(preds)
 }

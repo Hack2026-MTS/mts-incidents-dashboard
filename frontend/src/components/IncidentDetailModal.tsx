@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import {
   Brain,
   Building,
+  Clock,
   ExternalLink,
   Flame,
   Layers,
@@ -97,22 +98,24 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
           </div>
 
           {/* AI Analysis Box */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             {/* Risk Assessment */}
-            <div className="p-4 rounded-xl border border-red-900/40 bg-red-950/20">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold text-red-300 flex items-center gap-1.5">
-                  <Brain className="h-4 w-4 text-red-400" />
-                  Прогноз риска эскалации (ONNX)
-                </span>
-                <span className="text-sm font-bold font-mono text-red-200">
-                  {incident.aiRiskScore}%
-                </span>
+            <div className="p-4 rounded-xl border border-red-900/40 bg-red-950/20 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-red-300 flex items-center gap-1.5 text-xs">
+                    <Brain className="h-4 w-4 text-red-400" />
+                    Риск эскалации (ONNX)
+                  </span>
+                  <span className="text-sm font-bold font-mono text-red-200">
+                    {incident.aiRiskScore}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">
+                  Вероятность перехода в Наивысший статус на основе текста, сервиса и срочности.
+                </p>
               </div>
-              <p className="text-[11px] text-slate-400 mb-2">
-                Оценка вероятности срыва сроков SLA и перехода в Наивысший статус на основе текста, срочности и сервиса.
-              </p>
-              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden mt-2">
                 <div
                   className={`h-full rounded-full transition-all ${
                     incident.aiRiskScore > 75
@@ -129,23 +132,23 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
             {/* Smart Routing Hint */}
             <div className="p-4 rounded-xl border border-amber-900/40 bg-amber-950/20">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold text-amber-300 flex items-center gap-1.5">
+                <span className="font-semibold text-amber-300 flex items-center gap-1.5 text-xs">
                   <Sparkles className="h-4 w-4 text-amber-400" />
-                  Подсказка по маршрутизации
+                  Маршрутизация (ML)
                 </span>
-                <span className="text-xs font-mono text-amber-400">
-                  {incident.aiRoutingConfidence}% точность
+                <span className="text-xs font-mono text-amber-400 font-bold">
+                  {incident.aiRoutingConfidence}%
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mb-2">
-                Рекомендованная команда на основе классификации продукта, сервиса и ключевых симптомов:
+                Рекомендованная команда на основе классификации:
               </p>
               <div className="flex items-center justify-between gap-2 bg-slate-900/80 p-2 rounded-lg border border-amber-900/30">
-                <span className="font-medium text-slate-100 truncate">{incident.aiRoutingHint}</span>
+                <span className="font-medium text-slate-100 text-xs truncate">{incident.aiRoutingHint}</span>
                 <button
                   type="button"
                   onClick={() => applyRecommendedGroup(incident.aiRoutingHint)}
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-2.5 py-1 rounded text-[11px] transition-colors flex-shrink-0"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-2 py-0.5 rounded text-[10px] transition-colors flex-shrink-0"
                 >
                   Выбрать
                 </button>
@@ -154,12 +157,12 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
               {/* Top 3 */}
               {incident.aiRoutingTop && incident.aiRoutingTop.length > 1 && (
                 <div className="mt-2 space-y-1">
-                  <span className="text-[10px] text-slate-500 font-medium">Другие варианты:</span>
+                  <span className="text-[10px] text-slate-500 font-medium">Альтернативы:</span>
                   {incident.aiRoutingTop.slice(1).map((top, idx) => (
                     <div
                       key={idx}
                       onClick={() => applyRecommendedGroup(top.group)}
-                      className="flex items-center justify-between text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer py-0.5"
+                      className="flex items-center justify-between text-[10px] text-slate-400 hover:text-slate-200 cursor-pointer py-0.5"
                     >
                       <span className="truncate">{top.group}</span>
                       <span className="font-mono text-[10px] text-slate-500">{top.confidence}%</span>
@@ -167,6 +170,70 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Predictive SLA & Workload */}
+            <div className={`p-4 rounded-xl border flex flex-col justify-between ${
+              (incident.aiSlaRisk || 0) >= 75
+                ? 'border-rose-900/50 bg-rose-950/20'
+                : (incident.aiSlaRisk || 0) >= 50
+                ? 'border-amber-900/40 bg-amber-950/20'
+                : 'border-emerald-900/40 bg-emerald-950/20'
+            }`}>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className={`font-semibold flex items-center gap-1.5 text-xs ${
+                    (incident.aiSlaRisk || 0) >= 75
+                      ? 'text-rose-300'
+                      : (incident.aiSlaRisk || 0) >= 50
+                      ? 'text-amber-300'
+                      : 'text-emerald-300'
+                  }`}>
+                    <Clock className="h-4 w-4" />
+                    Прогноз SLA и очереди
+                  </span>
+                  <span className={`text-sm font-bold font-mono ${
+                    (incident.aiSlaRisk || 0) >= 75
+                      ? 'text-rose-200'
+                      : (incident.aiSlaRisk || 0) >= 50
+                      ? 'text-amber-200'
+                      : 'text-emerald-200'
+                  }`}>
+                    {incident.aiSlaRisk !== undefined ? `${incident.aiSlaRisk}%` : '—'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">
+                  Расчет с учетом очереди команды и профиля MTTR:
+                </p>
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded">
+                    <span className="text-slate-400">Очередь команды:</span>
+                    <span className="font-semibold font-mono text-slate-200">
+                      {incident.aiTeamWorkload ?? 0} активных
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded">
+                    <span className="text-slate-400">Оценка MTTR:</span>
+                    <span className="font-semibold font-mono text-slate-200">
+                      ~{Math.round(((incident.aiEstimatedMinutes || 0) / 60) * 10) / 10} ч
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-300 bg-slate-900/60 px-2 py-0.5 rounded">
+                    <span className="text-slate-400">Запас SLA:</span>
+                    <span className={`font-semibold font-mono ${
+                      (incident.aiSlaMarginMinutes || 0) < 0
+                        ? 'text-rose-400'
+                        : (incident.aiSlaMarginMinutes || 0) < 60
+                        ? 'text-amber-400'
+                        : 'text-emerald-400'
+                    }`}>
+                      {(incident.aiSlaMarginMinutes || 0) < 0
+                        ? `Просрочено`
+                        : `${incident.aiSlaMarginMinutes || 0} мин`}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 

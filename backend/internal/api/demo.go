@@ -62,6 +62,12 @@ func (d *DemoHandler) CreateCritical(w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved, _ := d.db.GetIncidentByID(inc.ID)
+	_ = d.db.RecordAIPrediction(saved)
+	_ = d.db.RecordEvent(saved.ID, "CREATED", "Зарегистрирован критический сбой: "+saved.Header, map[string]any{
+		"priority": saved.Priority,
+		"group":    saved.AssignedGroupName,
+		"risk":     saved.AIRiskScore,
+	})
 	d.sseHub.BroadcastEvent("CRITICAL_ALERT", saved, "🚨 КРИТИЧЕСКИЙ ИНЦИДЕНТ: "+saved.Header)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -109,6 +115,13 @@ func (d *DemoHandler) AssignToCoordinator(w http.ResponseWriter, r *http.Request
 	}
 
 	saved, _ := d.db.GetIncidentByID(inc.ID)
+	_ = d.db.RecordAIPrediction(saved)
+	_ = d.db.RecordEvent(saved.ID, "CREATED", "Инцидент поступил в систему", map[string]any{"group": saved.AssignedGroupName})
+	_ = d.db.RecordEvent(saved.ID, "AI_ROUTING_RECOMMENDED", "ИИ рекомендовал передать в: "+saved.AIRoutingHint, map[string]any{
+		"recommended_group": saved.AIRoutingHint,
+		"confidence":        saved.AIRoutingConfidence,
+		"risk_score":        saved.AIRiskScore,
+	})
 	d.sseHub.BroadcastEvent("COORDINATOR_ALERT", saved, "👤 Новый инцидент назначен на координаторов: "+saved.ID)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -150,6 +163,7 @@ func (d *DemoHandler) ResolveIncident(w http.ResponseWriter, r *http.Request) {
 
 	_ = d.db.UpsertIncident(inc)
 	saved, _ := d.db.GetIncidentByID(id)
+	_ = d.db.RecordEvent(saved.ID, "RESOLVED", "Инцидент решен: "+saved.Solution, map[string]any{"solution": saved.Solution})
 
 	d.sseHub.BroadcastEvent("INCIDENT_RESOLVED", saved, "✅ Инцидент успешно решен: "+saved.ID)
 

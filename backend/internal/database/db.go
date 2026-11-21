@@ -60,9 +60,36 @@ func (db *DB) InitSchema(schemaPath string) error {
 	return nil
 }
 
+func (db *DB) GetActiveTeamWorkloads() (map[string]int, error) {
+	query := `
+		SELECT assigned_group_name, COUNT(*)
+		FROM incidents
+		WHERE state NOT IN ('Завершен', 'Закрыт') AND assigned_group_name != ''
+		GROUP BY assigned_group_name
+	`
+	rows, err := db.Conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var g string
+		var c int
+		if err := rows.Scan(&g, &c); err == nil {
+			counts[g] = c
+		}
+	}
+	return counts, nil
+}
+
 func (db *DB) UpsertIncident(inc *models.Incident) error {
-	// First evaluate AI enrichments
-	ml.GetEngine().Evaluate(inc)
+	// Query current team queue workloads
+	workloads, _ := db.GetActiveTeamWorkloads()
+
+	// Evaluate AI enrichments (Risk Assessment, Routing Hint, SLA Breach Risk)
+	ml.GetEngine().Evaluate(inc, workloads)
 
 	query := `
 		INSERT INTO incidents (
@@ -73,7 +100,8 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			priority_id, priority, urgency_id, urgency, impact_id, impact,
 			product_name, product_master_id, service, scenario_name, solution,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
-			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence, updated_at
+			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
+			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
@@ -82,7 +110,8 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			$19, $20, $21, $22, $23, $24,
 			$25, $26, $27, $28, $29,
 			$30, $31, $32, $33, $34, $35,
-			$36, $37, $38, $39, NOW()
+			$36, $37, $38, $39,
+			$40, $41, $42, $43, NOW()
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
@@ -110,6 +139,10 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			ai_risk_level = EXCLUDED.ai_risk_level,
 			ai_routing_hint = EXCLUDED.ai_routing_hint,
 			ai_routing_confidence = EXCLUDED.ai_routing_confidence,
+			ai_sla_risk = EXCLUDED.ai_sla_risk,
+			ai_sla_level = EXCLUDED.ai_sla_level,
+			ai_team_workload = EXCLUDED.ai_team_workload,
+			ai_estimated_minutes = EXCLUDED.ai_estimated_minutes,
 			updated_at = NOW()
 	`
 
@@ -123,12 +156,15 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 		inc.ProductName, inc.ProductMasterID, inc.Service, inc.ScenarioName, inc.Solution,
 		inc.ServiceType, inc.ServiceTypeID, inc.IsEffect, inc.IsReason, inc.IsDouble, inc.IsMaster,
 		inc.AIRiskScore, inc.AIRiskLevel, inc.AIRoutingHint, inc.AIRoutingConfidence,
+		inc.AISLARisk, inc.AISLALevel, inc.AITeamWorkload, inc.AIEstimatedMinutes,
 	)
 
 	return err
 }
 
 func (db *DB) GetIncidents() ([]*models.Incident, error) {
+	workloads, _ := db.GetActiveTeamWorkloads()
+
 	query := `
 		SELECT 
 			id, sys_id, state, state_enum, state_id, state_reason,
@@ -139,6 +175,7 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 			product_name, product_master_id, service, scenario_name, solution,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
 			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
+			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes,
 			created_at, updated_at
 		FROM incidents
 		ORDER BY priority_id DESC, ai_risk_score DESC, updated_at DESC
@@ -166,6 +203,7 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 			&prodName, &prodMaster, &srv, &scen, &sol,
 			&srvType, &inc.ServiceTypeID, &inc.IsEffect, &inc.IsReason, &inc.IsDouble, &inc.IsMaster,
 			&inc.AIRiskScore, &inc.AIRiskLevel, &inc.AIRoutingHint, &inc.AIRoutingConfidence,
+			&inc.AISLARisk, &inc.AISLALevel, &inc.AITeamWorkload, &inc.AIEstimatedMinutes,
 			&inc.CreatedAt, &inc.UpdatedAt,
 		)
 		if err != nil {
@@ -191,8 +229,8 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 		inc.CompletionDate = completionDate
 		inc.LastAssignmentToTeamDateTime = lastAssignment
 
-		// Ensure AI model also gives top suggestions
-		ml.GetEngine().Evaluate(&inc)
+		// Ensure AI model also gives top suggestions & live SLA computation
+		ml.GetEngine().Evaluate(&inc, workloads)
 
 		incidents = append(incidents, &inc)
 	}
@@ -201,6 +239,8 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 }
 
 func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
+	workloads, _ := db.GetActiveTeamWorkloads()
+
 	query := `
 		SELECT 
 			id, sys_id, state, state_enum, state_id, state_reason,
@@ -211,6 +251,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 			product_name, product_master_id, service, scenario_name, solution,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
 			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
+			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes,
 			created_at, updated_at
 		FROM incidents
 		WHERE id = $1
@@ -231,6 +272,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 		&prodName, &prodMaster, &srv, &scen, &sol,
 		&srvType, &inc.ServiceTypeID, &inc.IsEffect, &inc.IsReason, &inc.IsDouble, &inc.IsMaster,
 		&inc.AIRiskScore, &inc.AIRiskLevel, &inc.AIRoutingHint, &inc.AIRoutingConfidence,
+		&inc.AISLARisk, &inc.AISLALevel, &inc.AITeamWorkload, &inc.AIEstimatedMinutes,
 		&inc.CreatedAt, &inc.UpdatedAt,
 	)
 	if err != nil {
@@ -256,7 +298,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 	inc.CompletionDate = completionDate
 	inc.LastAssignmentToTeamDateTime = lastAssignment
 
-	ml.GetEngine().Evaluate(&inc)
+	ml.GetEngine().Evaluate(&inc, workloads)
 
 	return &inc, nil
 }
@@ -291,6 +333,9 @@ func (db *DB) GetStats() (*models.DashboardStats, error) {
 		if inc.State == "Исследование ситуации" {
 			stats.UnderInvestigation++
 		}
+		if !isResolved && inc.AISLARisk >= 50.0 {
+			stats.SLARiskCount++
+		}
 	}
 
 	return stats, nil
@@ -324,4 +369,171 @@ func (db *DB) SeedFromJSONIfEmpty(jsonPath string) error {
 
 	log.Println("[DB] Seeding complete!")
 	return nil
+}
+
+// RecordEvent writes an audit log event into incident_events table
+func (db *DB) RecordEvent(incidentID, eventType, message string, payload any) error {
+	var payloadJSON []byte
+	if payload != nil {
+		payloadJSON, _ = json.Marshal(payload)
+	}
+
+	query := `
+		INSERT INTO incident_events (incident_id, event_type, message, payload, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`
+	_, err := db.Conn.Exec(query, incidentID, eventType, message, payloadJSON)
+	return err
+}
+
+type IncidentEventItem struct {
+	ID         int             `json:"id"`
+	IncidentID string          `json:"incidentId"`
+	EventType  string          `json:"eventType"`
+	Message    string          `json:"message"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
+	CreatedAt  time.Time       `json:"createdAt"`
+}
+
+// GetEventsForIncident returns the history of changes for a specific incident
+func (db *DB) GetEventsForIncident(incidentID string) ([]*IncidentEventItem, error) {
+	query := `
+		SELECT id, incident_id, event_type, message, payload, created_at
+		FROM incident_events
+		WHERE incident_id = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := db.Conn.Query(query, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []*IncidentEventItem
+	for rows.Next() {
+		var it IncidentEventItem
+		var p sql.NullString
+		if err := rows.Scan(&it.ID, &it.IncidentID, &it.EventType, &it.Message, &p, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		if p.Valid {
+			it.Payload = json.RawMessage(p.String)
+		}
+		events = append(events, &it)
+	}
+	return events, nil
+}
+
+type AIPredictionRecord struct {
+	ID                 int             `json:"id"`
+	IncidentID         string          `json:"incidentId"`
+	PredictedGroup     string          `json:"predictedGroup"`
+	Confidence         float64         `json:"confidence"`
+	TopCandidates      json.RawMessage `json:"topCandidates,omitempty"`
+	PredictedRiskScore float64         `json:"predictedRiskScore"`
+	PredictedRiskLevel string          `json:"predictedRiskLevel"`
+	ActualGroup        *string         `json:"actualGroup,omitempty"`
+	IsAccepted         *bool           `json:"isAccepted,omitempty"`
+	InputFeatures      json.RawMessage `json:"inputFeatures,omitempty"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	EvaluatedAt        *time.Time      `json:"evaluatedAt,omitempty"`
+}
+
+// RecordAIPrediction writes every AI prediction into ai_predictions table for future retraining & MLOps
+func (db *DB) RecordAIPrediction(inc *models.Incident) error {
+	topJSON, _ := json.Marshal(inc.AIRoutingTop)
+	featuresJSON, _ := json.Marshal(map[string]any{
+		"header":       inc.Header,
+		"description":  inc.Description,
+		"productName":  inc.ProductName,
+		"service":      inc.Service,
+		"scenarioName": inc.ScenarioName,
+		"priorityId":   inc.PriorityID,
+		"urgencyId":    inc.UrgencyID,
+		"impactId":     inc.ImpactID,
+		"serviceType":  inc.ServiceType,
+	})
+
+	query := `
+		INSERT INTO ai_predictions (
+			incident_id, predicted_group, confidence, top_candidates,
+			predicted_risk_score, predicted_risk_level, input_features, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+	`
+	_, err := db.Conn.Exec(
+		query,
+		inc.ID, inc.AIRoutingHint, inc.AIRoutingConfidence, topJSON,
+		inc.AIRiskScore, inc.AIRiskLevel, featuresJSON,
+	)
+	return err
+}
+
+// UpdateAIPredictionFeedback records what the coordinator actually chose vs what AI predicted
+func (db *DB) UpdateAIPredictionFeedback(incidentID, actualGroup string) error {
+	query := `
+		UPDATE ai_predictions
+		SET 
+			actual_group = $2,
+			is_accepted = (predicted_group = $2::varchar),
+			evaluated_at = NOW()
+		WHERE incident_id = $1 AND actual_group IS NULL
+	`
+	_, err := db.Conn.Exec(query, incidentID, actualGroup)
+	if err != nil {
+		log.Printf("[DB] Error updating AI feedback: %v\n", err)
+	}
+	return err
+}
+
+// GetAIPredictions returns all logged predictions for an incident
+func (db *DB) GetAIPredictions(incidentID string) ([]*AIPredictionRecord, error) {
+	query := `
+		SELECT 
+			id, incident_id, predicted_group, confidence, top_candidates,
+			predicted_risk_score, predicted_risk_level, actual_group, is_accepted,
+			input_features, created_at, evaluated_at
+		FROM ai_predictions
+		WHERE incident_id = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := db.Conn.Query(query, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []*AIPredictionRecord
+	for rows.Next() {
+		var r AIPredictionRecord
+		var top, feat sql.NullString
+		var act sql.NullString
+		var acc sql.NullBool
+		var eval *time.Time
+
+		err := rows.Scan(
+			&r.ID, &r.IncidentID, &r.PredictedGroup, &r.Confidence, &top,
+			&r.PredictedRiskScore, &r.PredictedRiskLevel, &act, &acc,
+			&feat, &r.CreatedAt, &eval,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if top.Valid {
+			r.TopCandidates = json.RawMessage(top.String)
+		}
+		if feat.Valid {
+			r.InputFeatures = json.RawMessage(feat.String)
+		}
+		if act.Valid {
+			r.ActualGroup = &act.String
+		}
+		if acc.Valid {
+			r.IsAccepted = &acc.Bool
+		}
+		r.EvaluatedAt = eval
+
+		records = append(records, &r)
+	}
+	return records, nil
 }

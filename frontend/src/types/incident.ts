@@ -47,6 +47,13 @@ export interface Incident {
   aiRoutingConfidence: number
   aiRoutingTop?: Array<{ group: string; confidence: number }>
 
+  // Predictive SLA & Workload Analysis
+  aiSlaRisk?: number
+  aiSlaLevel?: 'SAFE' | 'WARNING' | 'CRITICAL'
+  aiTeamWorkload?: number
+  aiEstimatedMinutes?: number
+  aiSlaMarginMinutes?: number
+
   createdAt?: string
   updatedAt?: string
 }
@@ -59,6 +66,7 @@ export interface DashboardStats {
   underInvestigation: number
   active: number
   resolved: number
+  slaRiskCount?: number
 }
 
 export interface SSEMessage {
