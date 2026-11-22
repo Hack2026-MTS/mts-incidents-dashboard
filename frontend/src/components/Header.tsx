@@ -81,19 +81,20 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="border-b border-slate-200 bg-white sticky top-0 z-40 px-4 md:px-6 py-2.5 flex items-center justify-between gap-4 text-xs select-none">
       {/* Left: MTS Logo & Title */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {/* Red MTS Square Logo */}
-        <div className="w-8 h-8 bg-[#E30611] rounded flex items-center justify-center font-black text-white text-[12px] tracking-tight shadow-sm">
-          МТС
+      <div className="flex items-center gap-3.5 flex-shrink-0">
+        {/* Red MTS Square Logo (Official 2023 brandmark: М top-left, Т top-right, С bottom-right) */}
+        <div
+          className="w-8 h-8 bg-[#E30611] rounded-[5px] p-1 flex flex-col justify-between select-none flex-shrink-0 shadow-xs"
+          title="МТС"
+        >
+          <div className="flex justify-between items-start leading-none font-black text-white text-[10.5px] px-0.5">
+            <span>М</span>
+            <span>Т</span>
+          </div>
+          <div className="flex justify-end items-end leading-none font-black text-white text-[10.5px] px-0.5">
+            <span>С</span>
+          </div>
         </div>
-
-        {/* Separator */}
-        <div className="h-5 w-px bg-slate-200" />
-
-        {/* MTS Brand text */}
-        <span className="font-semibold text-slate-400 text-xs tracking-wider">
-          МТС
-        </span>
 
         {/* Separator */}
         <div className="h-5 w-px bg-slate-200" />

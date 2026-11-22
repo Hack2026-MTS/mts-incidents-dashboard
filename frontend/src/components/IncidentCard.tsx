@@ -71,12 +71,24 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
     return `SLA: ${minutes}м`
   }
 
-  // Risk percentage & color
-  const riskScore = Math.round(incident.aiRiskScore || 0)
+  // Risk percentages & colors (Figma: Риск срыва SLA + Риск эскалации)
+  const escalationRisk = Math.round(incident.aiRiskScore || 0)
+  const slaRisk = Math.round(
+    incident.aiSlaRisk !== undefined
+      ? incident.aiSlaRisk
+      : Math.min(99, Math.round((incident.aiRiskScore || 25) * 0.85))
+  )
+
   const getRiskColor = (score: number) => {
     if (score >= 70) return 'text-[#E30611]'
-    if (score >= 40) return 'text-amber-600'
+    if (score >= 40) return 'text-[#F97316]'
     return 'text-slate-700'
+  }
+
+  const getRiskIconColor = (score: number) => {
+    if (score >= 70) return 'text-[#E30611]'
+    if (score >= 40) return 'text-[#F97316]'
+    return 'text-slate-400'
   }
 
   return (
@@ -116,11 +128,22 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
 
           {/* SLA Risk */}
           <div className="flex items-center gap-1.5">
-            <AlertTriangle className={`h-3.5 w-3.5 flex-shrink-0 ${getRiskColor(riskScore)}`} />
+            <AlertTriangle className={`h-3.5 w-3.5 flex-shrink-0 ${getRiskIconColor(slaRisk)}`} />
             <span className="text-slate-700">
               Риск срыва SLA:{' '}
-              <strong className={`font-bold ${getRiskColor(riskScore)}`}>
-                {riskScore}%
+              <strong className={`font-bold ${getRiskColor(slaRisk)}`}>
+                {slaRisk}%
+              </strong>
+            </span>
+          </div>
+
+          {/* Escalation Risk (Figma: Риск эскалации) */}
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className={`h-3.5 w-3.5 flex-shrink-0 ${getRiskIconColor(escalationRisk)}`} />
+            <span className="text-slate-700">
+              Риск эскалации:{' '}
+              <strong className={`font-bold ${getRiskColor(escalationRisk)}`}>
+                {escalationRisk}%
               </strong>
             </span>
           </div>

@@ -104,7 +104,25 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
   }, [incident.id, activeTab])
 
   const isCritical = incident.priorityId === 4 || incident.priority === 'Наивысший'
-  const riskScore = Math.round(incident.aiRiskScore || 0)
+  const escalationRisk = Math.round(incident.aiRiskScore || 0)
+  const slaRisk = Math.round(
+    incident.aiSlaRisk !== undefined
+      ? incident.aiSlaRisk
+      : Math.min(99, Math.round((incident.aiRiskScore || 25) * 0.85))
+  )
+
+  const getRiskLevelBadge = (level?: string, score: number = 0) => {
+    if (level === 'CRITICAL' || score >= 80) {
+      return { label: 'Критический', color: 'bg-red-50 text-[#E30611] border-red-200' }
+    }
+    if (level === 'HIGH' || score >= 65) {
+      return { label: 'Высокий', color: 'bg-orange-50 text-[#F97316] border-orange-200' }
+    }
+    if (level === 'MEDIUM' || score >= 35) {
+      return { label: 'Умеренный', color: 'bg-amber-50 text-amber-700 border-amber-200' }
+    }
+    return { label: 'Низкий', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+  }
 
   // List of available teams / executors
   const availableTeams = useMemo(() => {
@@ -348,6 +366,36 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                     {formatSlaRemaining(incident.deadline)}
                   </span>
                 </div>
+
+                {/* Риск эскалации (ONNX) */}
+                <div className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-white sm:col-span-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium">Риск эскалации:</span>
+                    <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-medium">
+                      ONNX
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`font-bold font-mono text-sm ${
+                        escalationRisk >= 70
+                          ? 'text-[#E30611]'
+                          : escalationRisk >= 40
+                          ? 'text-[#F97316]'
+                          : 'text-emerald-700'
+                      }`}
+                    >
+                      {escalationRisk}%
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        getRiskLevelBadge(incident.aiRiskLevel, escalationRisk).color
+                      }`}
+                    >
+                      {getRiskLevelBadge(incident.aiRiskLevel, escalationRisk).label}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* AI Copilot Intelligence Box */}
@@ -366,29 +414,81 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100">
-                    <span className="text-slate-500 block text-[11px]">Рекомендуемая команда:</span>
-                    <strong className="text-indigo-900 block font-semibold truncate mt-0.5">
-                      {incident.aiRoutingHint || incident.assignedGroupName}
-                    </strong>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  {/* Card 1: Recommender Routing */}
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100 flex flex-col justify-between">
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">Рекомендуемая команда:</span>
+                      <strong
+                        className="text-indigo-900 block font-semibold truncate mt-0.5"
+                        title={incident.aiRoutingHint || incident.assignedGroupName}
+                      >
+                        {incident.aiRoutingHint || incident.assignedGroupName}
+                      </strong>
+                    </div>
                     {incident.aiRoutingHint && incident.aiRoutingHint !== assignedGroup && (
                       <button
                         onClick={() => applyRecommendedGroup(incident.aiRoutingHint)}
-                        className="mt-1.5 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-1 rounded transition-colors cursor-pointer"
+                        className="mt-2 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-1 rounded transition-colors cursor-pointer w-full text-center"
                       >
                         Применить рекомендацию
                       </button>
                     )}
                   </div>
 
-                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100">
-                    <span className="text-slate-500 block text-[11px]">Прогноз риска SLA:</span>
-                    <strong className={`block font-bold text-sm mt-0.5 ${riskScore > 70 ? 'text-[#E30611]' : 'text-amber-600'}`}>
-                      {riskScore}% ({riskScore > 70 ? 'Критический' : 'Умеренный'})
-                    </strong>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      Расчетное время: ~{incident.aiEstimatedMinutes || 45} мин
+                  {/* Card 2: Risk of Escalation (ONNX) */}
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100 flex flex-col justify-between">
+                    <div>
+                      <span className="text-slate-500 block text-[11px] flex items-center justify-between">
+                        <span>Риск эскалации:</span>
+                        <span className="text-[9px] font-mono text-indigo-600 bg-indigo-50 px-1 rounded border border-indigo-100 font-bold">
+                          ONNX
+                        </span>
+                      </span>
+                      <div className="flex items-baseline gap-1.5 mt-1">
+                        <strong
+                          className={`font-bold text-sm ${
+                            escalationRisk >= 70
+                              ? 'text-[#E30611]'
+                              : escalationRisk >= 40
+                              ? 'text-[#F97316]'
+                              : 'text-emerald-700'
+                          }`}
+                        >
+                          {escalationRisk}%
+                        </strong>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                            getRiskLevelBadge(incident.aiRiskLevel, escalationRisk).color
+                          }`}
+                        >
+                          {getRiskLevelBadge(incident.aiRiskLevel, escalationRisk).label}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block truncate">
+                      Модель: risk_assessment
+                    </span>
+                  </div>
+
+                  {/* Card 3: SLA Breach Risk */}
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100 flex flex-col justify-between">
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">Прогноз срыва SLA:</span>
+                      <strong
+                        className={`block font-bold text-sm mt-1 ${
+                          slaRisk >= 70
+                            ? 'text-[#E30611]'
+                            : slaRisk >= 40
+                            ? 'text-[#F97316]'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {slaRisk}% ({slaRisk >= 70 ? 'Критический' : slaRisk >= 40 ? 'Умеренный' : 'Низкий'})
+                      </strong>
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">
+                      Расчет: ~{incident.aiEstimatedMinutes || 45} мин
                     </span>
                   </div>
                 </div>

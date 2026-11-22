@@ -1,5 +1,5 @@
 import React from 'react'
-import { ArrowUpRight, Flame } from 'lucide-react'
+import { Flame, AlertTriangle } from 'lucide-react'
 import type { Incident } from '../types/incident'
 
 interface IncidentTableViewProps {
@@ -82,14 +82,13 @@ export const IncidentTableView: React.FC<IncidentTableViewProps> = ({
               <th className="py-3.5 px-4">Приоритет</th>
               <th className="py-3.5 px-4">Статус</th>
               <th className="py-3.5 px-4">Назначенная группа</th>
-              <th className="py-3.5 px-4">SLA / Риск ИИ</th>
-              <th className="py-3.5 px-4 text-right">Действие</th>
+              <th className="py-3.5 px-4">SLA / Риск эскалации</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {incidents.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-400">
+                <td colSpan={7} className="py-8 text-center text-slate-400">
                   Нет инцидентов, соответствующих выбранным фильтрам
                 </td>
               </tr>
@@ -127,30 +126,19 @@ export const IncidentTableView: React.FC<IncidentTableViewProps> = ({
                         </span>
                         {risk > 0 && (
                           <span
-                            className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 ${
                               risk >= 70
-                                ? 'bg-red-50 text-[#E30611]'
+                                ? 'bg-red-50 text-[#E30611] border border-red-200'
                                 : risk >= 40
-                                ? 'bg-amber-50 text-amber-700'
-                                : 'bg-emerald-50 text-emerald-700'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             }`}
                           >
-                            Риск {risk}%
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            Риск эскалации: {risk}%
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onSelectIncident(inc)
-                        }}
-                        className="border border-slate-200 group-hover:border-slate-300 hover:bg-white text-slate-700 px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 shadow-2xs transition-all"
-                      >
-                        <span>Открыть</span>
-                        <ArrowUpRight className="h-3 w-3" />
-                      </button>
                     </td>
                   </tr>
                 )
