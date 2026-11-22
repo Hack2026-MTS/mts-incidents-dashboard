@@ -50,7 +50,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({ stats, activeFilter, onSelec
     },
     {
       key: 'active',
-      label: 'Активных в работе',
+      label: 'Активных инцидентов',
       count: stats.active,
       icon: AlertCircle,
       color: 'text-slate-300 bg-slate-900/60 border-slate-800 hover:border-slate-700',

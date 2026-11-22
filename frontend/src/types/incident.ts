@@ -75,3 +75,22 @@ export interface SSEMessage {
   message: string
   timestamp: string
 }
+
+export interface IncidentEvent {
+  id: number
+  incidentId: string
+  eventType: 'STATE_CHANGED' | 'REASSIGNED' | 'CREATED' | 'RESOLVED' | 'AI_ROUTING_RECOMMENDED' | string
+  message: string
+  payload?: any
+  createdAt: string
+}
+
+export interface NotificationItem {
+  id: string
+  type: 'CRITICAL_ALERT' | 'COORDINATOR_ALERT' | 'INCIDENT_RESOLVED' | 'INCIDENT_UPDATED' | 'STATE_CHANGED' | 'REASSIGNED' | 'INFO'
+  title: string
+  message: string
+  timestamp: string
+  read: boolean
+  incidentId?: string
+}

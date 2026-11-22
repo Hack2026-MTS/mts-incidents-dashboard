@@ -42,10 +42,10 @@ export const IncidentTableView: React.FC<IncidentTableViewProps> = ({
   }
 
   const getStateBadge = (state: string) => {
-    if (state === 'В работе' || state === 'Выполняется') {
+    if (state === 'Выполняется') {
       return (
         <span className="bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-          {state}
+          Выполняется
         </span>
       )
     }

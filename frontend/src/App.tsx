@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   LayoutGrid,
   PieChart,
@@ -13,9 +13,9 @@ import { IncidentDetailModal } from './components/IncidentDetailModal'
 import { IncidentTableView } from './components/IncidentTableView'
 import { OverviewDashboard } from './components/OverviewDashboard'
 import { ToolbarFilters } from './components/ToolbarFilters'
-import { getIncidents, getStats, updateIncident } from './services/api'
+import { getIncidents, getIncidentById, getStats, updateIncident } from './services/api'
 import { sseService } from './services/sse'
-import type { DashboardStats, Incident, SSEMessage } from './types/incident'
+import type { DashboardStats, Incident, NotificationItem } from './types/incident'
 import { soundAlert } from './utils/audio'
 
 type ViewMode = 'kanban' | 'overview' | 'table'
@@ -32,8 +32,28 @@ export function App() {
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [connected, setConnected] = useState(false)
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
-  const [alerts, setAlerts] = useState<SSEMessage[]>([])
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [toasts, setToasts] = useState<NotificationItem[]>([])
   const [emergencyBannerDismissed, setEmergencyBannerDismissed] = useState(false)
+
+  const addNotification = useCallback((
+    type: NotificationItem['type'],
+    title: string,
+    message: string,
+    incidentId?: string
+  ) => {
+    const item: NotificationItem = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      type,
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      read: false,
+      incidentId,
+    }
+    setNotifications((prev) => [item, ...prev.slice(0, 49)])
+    setToasts((prev) => [item, ...prev.slice(0, 2)])
+  }, [])
 
   const loadData = async () => {
     try {
@@ -45,6 +65,30 @@ export function App() {
     }
   }
 
+  // Reliable navigation to incident by ID (from notifications, banners, toasts)
+  const handleSelectIncidentById = useCallback(
+    async (id: string) => {
+      let found = incidents.find((i) => i.id === id || i.sysId === id)
+      if (!found) {
+        try {
+          found = await getIncidentById(id)
+        } catch (err) {
+          console.warn('[App] Could not fetch incident by ID from API', id, err)
+        }
+      }
+      if (found) {
+        setSelectedIncident(found)
+        // Mark matching notification as read
+        setNotifications((prev) =>
+          prev.map((n) =>
+            n.incidentId === id || n.message.includes(id) ? { ...n, read: true } : n
+          )
+        )
+      }
+    },
+    [incidents]
+  )
+
   useEffect(() => {
     loadData()
 
@@ -52,16 +96,25 @@ export function App() {
     const unsubStatus = sseService.onStatusChange((status) => setConnected(status))
 
     const unsubMessages = sseService.subscribe((msg) => {
+      const incId = msg.incident?.id || msg.message.match(/INC\d+/)?.[0]
+
       if (msg.type === 'CRITICAL_ALERT') {
         soundAlert.playCriticalAlert()
         setEmergencyBannerDismissed(false)
+        addNotification('CRITICAL_ALERT', '🔥 Критический инцидент', msg.message, incId)
       } else if (msg.type === 'COORDINATOR_ALERT') {
         soundAlert.playCoordinatorAlert()
+        addNotification('COORDINATOR_ALERT', '👥 Назначение координатору', msg.message, incId)
       } else if (msg.type === 'INCIDENT_RESOLVED') {
         soundAlert.playResolvedAlert()
+        addNotification('INCIDENT_RESOLVED', '✅ Инцидент решен', msg.message, incId)
+      } else if (msg.type === 'INCIDENT_UPDATED') {
+        addNotification('INCIDENT_UPDATED', 'Обновление инцидента', msg.message, incId)
+      } else if (msg.type === 'DASHBOARD_RESET') {
+        setEmergencyBannerDismissed(false)
+        addNotification('INFO', 'Сброс дашборда', 'Дашборд сброшен к исходным данным')
       }
 
-      setAlerts((prev) => [msg, ...prev.slice(0, 4)])
       loadData()
     })
 
@@ -70,10 +123,10 @@ export function App() {
       unsubMessages()
       sseService.disconnect()
     }
-  }, [])
+  }, [addNotification])
 
-  const handleDismissAlert = (idx: number) => {
-    setAlerts((prev) => prev.filter((_, i) => i !== idx))
+  const handleDismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
   }
 
   const handleToggleSound = () => {
@@ -85,6 +138,12 @@ export function App() {
   const handleQuickReassign = async (inc: Incident, targetGroup: string) => {
     try {
       await updateIncident(inc.id, { assignedGroupName: targetGroup })
+      addNotification(
+        'REASSIGNED',
+        'Перенаправление',
+        `Инцидент #${inc.id} перенаправлен в команду "${targetGroup}"`,
+        inc.id
+      )
       await loadData()
     } catch (e) {
       alert('Ошибка при переназначении: ' + e)
@@ -93,10 +152,26 @@ export function App() {
 
   const handleUpdateIncident = async (id: string, updates: Partial<Incident>) => {
     await updateIncident(id, updates)
+    if (updates.state) {
+      addNotification(
+        'STATE_CHANGED',
+        'Смена статуса',
+        `Инцидент #${id}: статус изменен на "${updates.state}"`,
+        id
+      )
+    }
+    if (updates.assignedGroupName) {
+      addNotification(
+        'REASSIGNED',
+        'Перенаправление',
+        `Инцидент #${id}: назначен в команду "${updates.assignedGroupName}"`,
+        id
+      )
+    }
     await loadData()
   }
 
-  // Extract unique products, teams and statuses for filters
+  // Extract unique products, teams and statuses for filters (without 'В работе')
   const uniqueProducts = useMemo(() => {
     const set = new Set<string>()
     incidents.forEach((i) => {
@@ -117,7 +192,7 @@ export function App() {
   const uniqueStatuses = useMemo(() => {
     const set = new Set<string>()
     incidents.forEach((i) => {
-      if (i.state) set.add(i.state)
+      if (i.state && i.state !== 'В работе') set.add(i.state)
     })
     return Array.from(set).sort()
   }, [incidents])
@@ -152,8 +227,24 @@ export function App() {
 
       // Status filter
       if (statusFilter) {
-        if (inc.state !== statusFilter) {
-          return false
+        const normFilter = statusFilter.trim()
+        const normState = inc.state ? inc.state.trim() : ''
+        if (normFilter === 'Назначен') {
+          if (normState !== 'Назначен' && normState !== 'Назначен координатору') {
+            return false
+          }
+        } else if (normFilter === 'Выполняется') {
+          if (normState !== 'Выполняется' && normState !== 'В работе') {
+            return false
+          }
+        } else if (normFilter === 'Завершен' || normFilter === 'Закрыт') {
+          if (normState !== 'Завершен' && normState !== 'Закрыт') {
+            return false
+          }
+        } else {
+          if (normState !== normFilter) {
+            return false
+          }
         }
       }
 
@@ -266,10 +357,18 @@ export function App() {
   }, [filteredIncidents, statusFilter])
 
   // Critical incident for emergency banner (from Figma АРТЕМ Уведомление)
+  // Evaluated across ALL incidents so global critical emergency alerts are never hidden by local filters!
   const activeCriticalIncident = useMemo(() => {
     if (emergencyBannerDismissed) return null
-    return criticalGroup[0] || null
-  }, [criticalGroup, emergencyBannerDismissed])
+    return (
+      incidents.find(
+        (i) =>
+          (i.priorityId === 4 || i.priority === 'Наивысший' || i.priority === 'Критический') &&
+          i.state !== 'Завершен' &&
+          i.state !== 'Закрыт'
+      ) || null
+    )
+  }, [incidents, emergencyBannerDismissed])
 
   return (
     <div className="h-screen w-screen bg-[#F8FAFC] text-slate-900 flex flex-col overflow-hidden font-sans select-none antialiased">
@@ -281,7 +380,10 @@ export function App() {
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         stats={stats}
-        alerts={alerts}
+        notifications={notifications}
+        onMarkAllRead={() => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))}
+        onClearNotifications={() => setNotifications([])}
+        onSelectIncidentById={handleSelectIncidentById}
       />
 
       {/* Main Content Area */}
@@ -439,7 +541,11 @@ export function App() {
       />
 
       {/* Real-time Alerts Toasts */}
-      <AlertToast alerts={alerts} onDismiss={handleDismissAlert} />
+      <AlertToast
+        toasts={toasts}
+        onDismiss={handleDismissToast}
+        onSelectIncidentById={handleSelectIncidentById}
+      />
 
       {/* Live ITSM Simulation Panel */}
       <DemoPanel onRefresh={loadData} />

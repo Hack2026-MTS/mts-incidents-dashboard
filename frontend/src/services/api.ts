@@ -1,9 +1,64 @@
-import type { DashboardStats, Incident } from '../types/incident'
+import type { DashboardStats, Incident, IncidentEvent } from '../types/incident'
 import { INITIAL_MOCK_INCIDENTS } from '../data/mockIncidents'
 
 const API_BASE = '/api'
 
 let memoryIncidents = [...INITIAL_MOCK_INCIDENTS]
+const memoryEvents: Record<string, IncidentEvent[]> = {}
+
+export function recordLocalEvent(
+  incidentId: string,
+  eventType: string,
+  message: string,
+  payload?: any
+): IncidentEvent {
+  if (!memoryEvents[incidentId]) {
+    memoryEvents[incidentId] = []
+  }
+  const event: IncidentEvent = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    incidentId,
+    eventType,
+    message,
+    payload,
+    createdAt: new Date().toISOString(),
+  }
+  memoryEvents[incidentId].unshift(event)
+  return event
+}
+
+export async function getIncidentEvents(id: string): Promise<IncidentEvent[]> {
+  try {
+    const res = await fetch(`${API_BASE}/incidents/${id}/events`)
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        // Backend returned authoritative events; deduplicate any exact duplicates
+        const uniqueEvents: IncidentEvent[] = []
+        const seen = new Set<string>()
+        for (const evt of data) {
+          // Deduplicate by event type, message and time (within same second)
+          const timeSec = evt.createdAt ? new Date(evt.createdAt).toISOString().substring(0, 19) : ''
+          const key = `${evt.eventType}_${evt.message}_${timeSec}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            uniqueEvents.push(evt)
+          }
+        }
+        // Sync local memory so we don't have orphan duplicates
+        memoryEvents[id] = uniqueEvents
+        return uniqueEvents.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
+      }
+    }
+  } catch (err) {
+    console.warn('[API] Could not fetch incident events from backend, using local events', err)
+  }
+  return (memoryEvents[id] || []).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )
+}
 
 export async function getIncidents(search = '', group = ''): Promise<Incident[]> {
   try {
@@ -59,6 +114,10 @@ export async function getIncidentById(id: string): Promise<Incident> {
 }
 
 export async function updateIncident(id: string, data: Partial<Incident>): Promise<Incident> {
+  const current = memoryIncidents.find((i) => i.id === id)
+  const oldState = current?.state
+  const oldGroup = current?.assignedGroupName
+
   try {
     const res = await fetch(`${API_BASE}/incidents/${id}`, {
       method: 'PUT',
@@ -66,10 +125,30 @@ export async function updateIncident(id: string, data: Partial<Incident>): Promi
       body: JSON.stringify(data),
     })
     if (res.ok) {
-      return await res.json()
+      const updated = await res.json()
+      const idx = memoryIncidents.findIndex((i) => i.id === id)
+      if (idx !== -1) {
+        memoryIncidents[idx] = updated
+      }
+      return updated
     }
   } catch {
     // fallback
+  }
+
+  // Fallback in-memory recording if backend offline
+  if (data.state && oldState && data.state !== oldState) {
+    recordLocalEvent(id, 'STATE_CHANGED', `Статус изменен: ${oldState} → ${data.state}`, {
+      old: oldState,
+      new: data.state,
+    })
+  }
+
+  if (data.assignedGroupName && oldGroup && data.assignedGroupName !== oldGroup) {
+    recordLocalEvent(id, 'REASSIGNED', `Перенаправлен в команду: ${data.assignedGroupName}`, {
+      from: oldGroup,
+      to: data.assignedGroupName,
+    })
   }
 
   // Update in memory

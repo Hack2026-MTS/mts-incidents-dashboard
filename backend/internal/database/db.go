@@ -364,6 +364,11 @@ func (db *DB) SeedFromJSONIfEmpty(jsonPath string) error {
 	for _, inc := range rawIncidents {
 		if err := db.UpsertIncident(inc); err != nil {
 			log.Printf("[DB] Failed to insert incident %s: %v\n", inc.ID, err)
+		} else {
+			_ = db.RecordEvent(inc.ID, "CREATED", "Инцидент зарегистрирован в системе", map[string]string{
+				"state": inc.State,
+				"group": inc.AssignedGroupName,
+			})
 		}
 	}
 

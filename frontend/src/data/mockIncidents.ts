@@ -56,8 +56,8 @@ export const INITIAL_MOCK_INCIDENTS: Incident[] = [
   {
     id: 'INC000021941314',
     sysId: 'sys_9481025',
-    state: 'В работе',
-    stateEnum: 'InProgress',
+    state: 'Выполняется',
+    stateEnum: 'WorkInProgress',
     stateId: 2,
     header: 'Рост времени отклика API',
     description: 'Превышение пороговых значений latency на микросервисном шлюзе API Gateway SimpleOne. Среднее время ответа выросло со 120мс до 1450мс. Наблюдаются задержки синхронизации заявок.',
