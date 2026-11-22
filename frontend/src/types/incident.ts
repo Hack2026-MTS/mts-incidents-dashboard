@@ -39,6 +39,7 @@ export interface Incident {
   scenarioName?: string
   isNeedUp?: boolean
   solution?: string
+  isAccepted?: boolean
 
   // AI Enrichments
   aiRiskScore: number

@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import {
-  LayoutGrid,
-  PieChart,
-  Table,
-} from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { AlertToast } from './components/AlertToast'
 import { ColumnGroup } from './components/ColumnGroup'
 import { DemoPanel } from './components/DemoPanel'
@@ -386,73 +382,77 @@ export function App() {
         onSelectIncidentById={handleSelectIncidentById}
       />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden px-4 md:px-6 pt-2 pb-3">
-        {/* Emergency Alert Banner (Figma "АРТЕМ Уведомление") */}
-        <EmergencyAlertBanner
-          incident={activeCriticalIncident}
-          onOpen={setSelectedIncident}
-          onDismiss={() => setEmergencyBannerDismissed(true)}
-        />
+      {/* Main Workspace Layout with Left Sidebar matching Figma */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Navigation Sidebar matching Figma Frame ОБЗОР */}
+        <aside className="w-24 sm:w-28 bg-white border-r border-slate-200/80 py-4 px-2.5 flex flex-col items-center gap-2.5 flex-shrink-0 select-none">
+          <button
+            className="p-1.5 text-slate-700 hover:text-slate-950 rounded-lg hover:bg-slate-100 mb-1 cursor-pointer transition-colors"
+            title="Меню"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <button
+            onClick={() => setViewMode('overview')}
+            className={`w-full py-1.5 px-3 rounded-full text-xs text-center transition-all cursor-pointer ${
+              viewMode === 'overview'
+                ? 'bg-[#E30611] text-white font-bold shadow-xs'
+                : 'bg-white border border-[#E30611] text-[#E30611] font-semibold hover:bg-red-50'
+            }`}
+          >
+            Обзор
+          </button>
+          <button
+            onClick={() => setViewMode('kanban')}
+            className={`w-full py-1.5 px-3 rounded-full text-xs text-center transition-all cursor-pointer ${
+              viewMode === 'kanban'
+                ? 'bg-[#E30611] text-white font-bold shadow-xs'
+                : 'bg-white border border-[#E30611] text-[#E30611] font-semibold hover:bg-red-50'
+            }`}
+          >
+            Инциденты
+          </button>
+          <button
+            onClick={() => setViewMode('table')}
+            className={`w-full py-1.5 px-3 rounded-full text-xs text-center transition-all cursor-pointer ${
+              viewMode === 'table'
+                ? 'bg-[#E30611] text-white font-bold shadow-xs'
+                : 'bg-white border border-[#E30611] text-[#E30611] font-semibold hover:bg-red-50'
+            }`}
+          >
+            Отчет
+          </button>
+        </aside>
 
-        {/* Toolbar & Filter Bar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2.5 border-b border-slate-200/80 mb-3 flex-shrink-0">
-          <ToolbarFilters
-            dateFilter={dateFilter}
-            onDateFilterChange={setDateFilter}
-            productFilter={productFilter}
-            onProductFilterChange={setProductFilter}
-            products={uniqueProducts}
-            teamFilter={teamFilter}
-            onTeamFilterChange={setTeamFilter}
-            teams={uniqueTeams}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            statuses={uniqueStatuses}
-            onClearFilters={handleClearFilters}
-            activeFiltersCount={activeFiltersCount}
+        {/* Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden px-4 md:px-6 pt-3 pb-3">
+          {/* Emergency Alert Banner (Figma "АРТЕМ Уведомление") */}
+          <EmergencyAlertBanner
+            incident={activeCriticalIncident}
+            onOpen={setSelectedIncident}
+            onDismiss={() => setEmergencyBannerDismissed(true)}
           />
 
-          {/* View Mode Switcher */}
-          <div className="flex items-center gap-1 self-end lg:self-center bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs flex-shrink-0">
-            <button
-              onClick={() => setViewMode('kanban')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                viewMode === 'kanban'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Канбан-доска (4 колонки) — Фрейм 02"
-            >
-              <LayoutGrid className="h-3.5 w-3.5 text-[#E30611]" />
-              <span>Доска</span>
-            </button>
-            <button
-              onClick={() => setViewMode('overview')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                viewMode === 'overview'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Сводный обзор и аналитика угроз"
-            >
-              <PieChart className="h-3.5 w-3.5 text-indigo-600" />
-              <span>Обзор</span>
-            </button>
-            <button
-              onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                viewMode === 'table'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Таблица инцидентов"
-            >
-              <Table className="h-3.5 w-3.5 text-slate-700" />
-              <span>Таблица</span>
-            </button>
-          </div>
-        </div>
+          {/* Toolbar & Filter Bar (shown in kanban and table views) */}
+          {viewMode !== 'overview' && (
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2.5 border-b border-slate-200/80 mb-3 flex-shrink-0">
+              <ToolbarFilters
+                dateFilter={dateFilter}
+                onDateFilterChange={setDateFilter}
+                productFilter={productFilter}
+                onProductFilterChange={setProductFilter}
+                products={uniqueProducts}
+                teamFilter={teamFilter}
+                onTeamFilterChange={setTeamFilter}
+                teams={uniqueTeams}
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+                statuses={uniqueStatuses}
+                onClearFilters={handleClearFilters}
+                activeFiltersCount={activeFiltersCount}
+              />
+            </div>
+          )}
 
         {/* View 1: 02 — Dashboard Redesign (4 Columns Kanban) */}
         {viewMode === 'kanban' && (
@@ -530,6 +530,7 @@ export function App() {
             />
           </main>
         )}
+        </div>
       </div>
 
       {/* Incident Detail Modal / Drawer (Figma "Детали инцидента") */}
