@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"hack2026/backend/internal/database"
@@ -179,8 +180,19 @@ func (d *DemoHandler) ResetData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seedPath := "c:\\Users\\lacker\\Projects\\Hack2026\\data\\character_problems.json"
-	_ = d.db.SeedFromJSONIfEmpty(seedPath)
+	seedCandidates := []string{
+		"/app/data/character_problems.json",
+		"data/character_problems.json",
+		"../data/character_problems.json",
+		"../../data/character_problems.json",
+	}
+	for _, p := range seedCandidates {
+		if _, err := os.Stat(p); err == nil {
+			if err := d.db.SeedFromJSONIfEmpty(p); err == nil {
+				break
+			}
+		}
+	}
 
 	d.sseHub.BroadcastEvent("DASHBOARD_RESET", nil, "Дашборд сброшен к исходным данным")
 

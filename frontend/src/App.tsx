@@ -1,23 +1,39 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Clock, Flame, Users } from 'lucide-react'
+import {
+  LayoutGrid,
+  PieChart,
+  Table,
+} from 'lucide-react'
 import { AlertToast } from './components/AlertToast'
 import { ColumnGroup } from './components/ColumnGroup'
 import { DemoPanel } from './components/DemoPanel'
+import { EmergencyAlertBanner } from './components/EmergencyAlertBanner'
 import { Header } from './components/Header'
 import { IncidentDetailModal } from './components/IncidentDetailModal'
+import { IncidentTableView } from './components/IncidentTableView'
+import { OverviewDashboard } from './components/OverviewDashboard'
+import { ToolbarFilters } from './components/ToolbarFilters'
 import { getIncidents, getStats, updateIncident } from './services/api'
 import { sseService } from './services/sse'
 import type { DashboardStats, Incident, SSEMessage } from './types/incident'
 import { soundAlert } from './utils/audio'
 
+type ViewMode = 'kanban' | 'overview' | 'table'
+
 export function App() {
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [search, setSearch] = useState('')
+  const [dateFilter, setDateFilter] = useState('all')
+  const [productFilter, setProductFilter] = useState('')
+  const [teamFilter, setTeamFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [viewMode, setViewMode] = useState<ViewMode>('kanban')
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [connected, setConnected] = useState(false)
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
   const [alerts, setAlerts] = useState<SSEMessage[]>([])
+  const [emergencyBannerDismissed, setEmergencyBannerDismissed] = useState(false)
 
   const loadData = async () => {
     try {
@@ -38,11 +54,14 @@ export function App() {
     const unsubMessages = sseService.subscribe((msg) => {
       if (msg.type === 'CRITICAL_ALERT') {
         soundAlert.playCriticalAlert()
+        setEmergencyBannerDismissed(false)
       } else if (msg.type === 'COORDINATOR_ALERT') {
         soundAlert.playCoordinatorAlert()
+      } else if (msg.type === 'INCIDENT_RESOLVED') {
+        soundAlert.playResolvedAlert()
       }
 
-      setAlerts((prev) => [msg, ...prev.slice(0, 3)])
+      setAlerts((prev) => [msg, ...prev.slice(0, 4)])
       loadData()
     })
 
@@ -77,48 +96,184 @@ export function App() {
     await loadData()
   }
 
-  // Filter out closed/resolved from main active monitoring by default unless matching search
+  // Extract unique products, teams and statuses for filters
+  const uniqueProducts = useMemo(() => {
+    const set = new Set<string>()
+    incidents.forEach((i) => {
+      if (i.productName) set.add(i.productName)
+      if (i.service) set.add(i.service)
+    })
+    return Array.from(set).sort()
+  }, [incidents])
+
+  const uniqueTeams = useMemo(() => {
+    const set = new Set<string>()
+    incidents.forEach((i) => {
+      if (i.assignedGroupName) set.add(i.assignedGroupName)
+    })
+    return Array.from(set).sort()
+  }, [incidents])
+
+  const uniqueStatuses = useMemo(() => {
+    const set = new Set<string>()
+    incidents.forEach((i) => {
+      if (i.state) set.add(i.state)
+    })
+    return Array.from(set).sort()
+  }, [incidents])
+
+  // Filtered incidents based on search & toolbar dropdowns
   const filteredIncidents = useMemo(() => {
     return incidents.filter((inc) => {
+      // Search
       if (search.trim()) {
         const q = search.toLowerCase()
-        return (
+        const matchesSearch =
           inc.id.toLowerCase().includes(q) ||
           inc.header.toLowerCase().includes(q) ||
           (inc.productName && inc.productName.toLowerCase().includes(q)) ||
           (inc.assignedGroupName && inc.assignedGroupName.toLowerCase().includes(q))
-        )
+        if (!matchesSearch) return false
       }
+
+      // Product filter
+      if (productFilter) {
+        if (inc.productName !== productFilter && inc.service !== productFilter) {
+          return false
+        }
+      }
+
+      // Team filter
+      if (teamFilter) {
+        if (inc.assignedGroupName !== teamFilter) {
+          return false
+        }
+      }
+
+      // Status filter
+      if (statusFilter) {
+        if (inc.state !== statusFilter) {
+          return false
+        }
+      }
+
+      // Date filter
+      if (dateFilter !== 'all' && inc.submitDate) {
+        const submit = new Date(inc.submitDate).getTime()
+        const now = Date.now()
+        if (dateFilter === 'today') {
+          const startOfToday = new Date().setHours(0, 0, 0, 0)
+          if (submit < startOfToday) return false
+        } else if (dateFilter === '24h') {
+          if (now - submit > 24 * 3600 * 1000) return false
+        } else if (dateFilter === '7d') {
+          if (now - submit > 7 * 24 * 3600 * 1000) return false
+        }
+      }
+
       return true
     })
-  }, [incidents, search])
+  }, [incidents, search, productFilter, teamFilter, statusFilter, dateFilter])
 
-  // 4 Required Groups (allowing multi-group representation)
-  // 1. Критические (Наивысший)
+  // Count active filters
+  const activeFiltersCount = useMemo(() => {
+    let count = 0
+    if (dateFilter !== 'all') count++
+    if (productFilter) count++
+    if (teamFilter) count++
+    if (statusFilter) count++
+    return count
+  }, [dateFilter, productFilter, teamFilter, statusFilter])
+
+  const handleClearFilters = () => {
+    setDateFilter('all')
+    setProductFilter('')
+    setTeamFilter('')
+    setStatusFilter('')
+    setSearch('')
+  }
+
+  // Stable sort helper so cards never jump or swap unexpectedly
+  const stableSort = (cards: Incident[]) => {
+    return [...cards].sort((a, b) => {
+      if ((b.priorityId || 0) !== (a.priorityId || 0)) {
+        return (b.priorityId || 0) - (a.priorityId || 0)
+      }
+      if ((b.aiRiskScore || 0) !== (a.aiRiskScore || 0)) {
+        return (b.aiRiskScore || 0) - (a.aiRiskScore || 0)
+      }
+      return (b.id || '').localeCompare(a.id || '')
+    })
+  }
+
+  const isExcludedState = (inc: Incident) => {
+    if (statusFilter) return false // user explicitly chose to filter by a specific status
+    return inc.state === 'Завершен' || inc.state === 'Закрыт'
+  }
+
+  // 4 Operational Kanban Columns for "02 — Dashboard Redesign":
+  // 1. Критические (P4 / Наивысший)
   const criticalGroup = useMemo(() => {
-    return filteredIncidents.filter((inc) => inc.priorityId === 4 || inc.priority === 'Наивысший')
-  }, [filteredIncidents])
-
-  // 2. Назначенные на координаторов
-  const coordinatorGroup = useMemo(() => {
-    return filteredIncidents.filter(
-      (inc) => inc.assignedGroupName === 'КЦ ИТ Координаторы Массовых Инцидентов'
+    const list = filteredIncidents.filter(
+      (inc) =>
+        (inc.priorityId === 4 || inc.priority === 'Наивысший' || inc.priority === 'Критический') &&
+        !isExcludedState(inc)
     )
-  }, [filteredIncidents])
+    return stableSort(list)
+  }, [filteredIncidents, statusFilter])
 
-  // 3. Высокий приоритет
+  // 2. На координаторах (КЦ ИТ Координаторы Массовых Инцидентов или назначен координатор)
+  const coordinatorGroup = useMemo(() => {
+    const list = filteredIncidents.filter(
+      (inc) =>
+        (inc.assignedGroupName === 'КЦ ИТ Координаторы Массовых Инцидентов' ||
+          inc.state === 'Назначен координатору') &&
+        inc.priorityId !== 4 &&
+        inc.priority !== 'Наивысший' &&
+        inc.priority !== 'Критический' &&
+        !isExcludedState(inc)
+    )
+    return stableSort(list)
+  }, [filteredIncidents, statusFilter])
+
+  // 3. Высокий приоритет (P3 / Высокий)
   const highPriorityGroup = useMemo(() => {
-    return filteredIncidents.filter((inc) => inc.priorityId === 3 || inc.priority === 'Высокий')
-  }, [filteredIncidents])
+    const list = filteredIncidents.filter(
+      (inc) =>
+        (inc.priorityId === 3 || inc.priority === 'Высокий') &&
+        inc.assignedGroupName !== 'КЦ ИТ Координаторы Массовых Инцидентов' &&
+        inc.state !== 'Назначен координатору' &&
+        !isExcludedState(inc)
+    )
+    return stableSort(list)
+  }, [filteredIncidents, statusFilter])
 
-  // 4. Исследование ситуации (разбор причин)
-  const investigationGroup = useMemo(() => {
-    return filteredIncidents.filter((inc) => inc.state === 'Исследование ситуации')
-  }, [filteredIncidents])
+  // 4. Диагностика (Исследование ситуации / разбор причин / P1, P2)
+  const diagnosisGroup = useMemo(() => {
+    const list = filteredIncidents.filter(
+      (inc) =>
+        (inc.state === 'Исследование ситуации' ||
+          inc.stateId === 3 ||
+          inc.priorityId <= 2) &&
+        inc.priorityId !== 4 &&
+        inc.priority !== 'Наивысший' &&
+        inc.priority !== 'Критический' &&
+        inc.assignedGroupName !== 'КЦ ИТ Координаторы Массовых Инцидентов' &&
+        inc.state !== 'Назначен координатору' &&
+        !isExcludedState(inc)
+    )
+    return stableSort(list)
+  }, [filteredIncidents, statusFilter])
+
+  // Critical incident for emergency banner (from Figma АРТЕМ Уведомление)
+  const activeCriticalIncident = useMemo(() => {
+    if (emergencyBannerDismissed) return null
+    return criticalGroup[0] || null
+  }, [criticalGroup, emergencyBannerDismissed])
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans select-none">
-      {/* Compact Top Bar */}
+    <div className="h-screen w-screen bg-[#F8FAFC] text-slate-900 flex flex-col overflow-hidden font-sans select-none antialiased">
+      {/* Top Header matching Figma */}
       <Header
         connected={connected}
         search={search}
@@ -126,76 +281,167 @@ export function App() {
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
         stats={stats}
+        alerts={alerts}
       />
 
-      {/* Main 4 Columns Dashboard (maximizes screen estate) */}
-      <main className="flex-1 px-3 pt-2 pb-2 overflow-hidden">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5 h-full">
-          {/* Column 1: Критические */}
-          <ColumnGroup
-            title="Критические инциденты"
-            count={criticalGroup.length}
-            icon={<Flame className="h-3.5 w-3.5 text-red-500" />}
-            colorHeader="bg-red-950/40 text-red-200"
-            borderColor="border-red-900/60"
-            badgeColor="bg-red-600 text-white"
-            incidents={criticalGroup}
-            onCardClick={setSelectedIncident}
-            onQuickReassign={handleQuickReassign}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden px-4 md:px-6 pt-2 pb-3">
+        {/* Emergency Alert Banner (Figma "АРТЕМ Уведомление") */}
+        <EmergencyAlertBanner
+          incident={activeCriticalIncident}
+          onOpen={setSelectedIncident}
+          onDismiss={() => setEmergencyBannerDismissed(true)}
+        />
+
+        {/* Toolbar & Filter Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2.5 border-b border-slate-200/80 mb-3 flex-shrink-0">
+          <ToolbarFilters
+            dateFilter={dateFilter}
+            onDateFilterChange={setDateFilter}
+            productFilter={productFilter}
+            onProductFilterChange={setProductFilter}
+            products={uniqueProducts}
+            teamFilter={teamFilter}
+            onTeamFilterChange={setTeamFilter}
+            teams={uniqueTeams}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            statuses={uniqueStatuses}
+            onClearFilters={handleClearFilters}
+            activeFiltersCount={activeFiltersCount}
           />
 
-          {/* Column 2: На координаторах */}
-          <ColumnGroup
-            title="На координаторах"
-            count={coordinatorGroup.length}
-            icon={<Users className="h-3.5 w-3.5 text-amber-500" />}
-            colorHeader="bg-amber-950/40 text-amber-200"
-            borderColor="border-amber-900/60"
-            badgeColor="bg-amber-500 text-slate-950 font-black"
-            incidents={coordinatorGroup}
-            onCardClick={setSelectedIncident}
-            onQuickReassign={handleQuickReassign}
-          />
-
-          {/* Column 3: Высокий приоритет */}
-          <ColumnGroup
-            title="Высокий приоритет"
-            count={highPriorityGroup.length}
-            icon={<AlertTriangle className="h-3.5 w-3.5 text-orange-500" />}
-            colorHeader="bg-orange-950/40 text-orange-200"
-            borderColor="border-orange-900/60"
-            badgeColor="bg-orange-500 text-white"
-            incidents={highPriorityGroup}
-            onCardClick={setSelectedIncident}
-            onQuickReassign={handleQuickReassign}
-          />
-
-          {/* Column 4: Исследование ситуации */}
-          <ColumnGroup
-            title="Исследование ситуации"
-            count={investigationGroup.length}
-            icon={<Clock className="h-3.5 w-3.5 text-blue-500" />}
-            colorHeader="bg-blue-950/40 text-blue-200"
-            borderColor="border-blue-900/60"
-            badgeColor="bg-blue-600 text-white"
-            incidents={investigationGroup}
-            onCardClick={setSelectedIncident}
-            onQuickReassign={handleQuickReassign}
-          />
+          {/* View Mode Switcher */}
+          <div className="flex items-center gap-1 self-end lg:self-center bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs flex-shrink-0">
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'kanban'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Канбан-доска (4 колонки) — Фрейм 02"
+            >
+              <LayoutGrid className="h-3.5 w-3.5 text-[#E30611]" />
+              <span>Доска</span>
+            </button>
+            <button
+              onClick={() => setViewMode('overview')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'overview'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Сводный обзор и аналитика угроз"
+            >
+              <PieChart className="h-3.5 w-3.5 text-indigo-600" />
+              <span>Обзор</span>
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+              title="Таблица инцидентов"
+            >
+              <Table className="h-3.5 w-3.5 text-slate-700" />
+              <span>Таблица</span>
+            </button>
+          </div>
         </div>
-      </main>
 
-      {/* Incident Detail Modal */}
+        {/* View 1: 02 — Dashboard Redesign (4 Columns Kanban) */}
+        {viewMode === 'kanban' && (
+          <main className="flex-1 overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 h-full">
+              {/* Column 1: Критические */}
+              <ColumnGroup
+                title="Критические"
+                count={criticalGroup.length}
+                headerBg="bg-[#FEE2E2]"
+                headerTextClass="text-[#991B1B]"
+                badgeBg="bg-[#E30611] text-white"
+                incidents={criticalGroup}
+                onCardClick={setSelectedIncident}
+                onQuickReassign={handleQuickReassign}
+              />
+
+              {/* Column 2: На координаторах */}
+              <ColumnGroup
+                title="На координаторах"
+                count={coordinatorGroup.length}
+                headerBg="bg-[#FEF3C7]"
+                headerTextClass="text-[#92400E]"
+                badgeBg="bg-[#D97706] text-white"
+                incidents={coordinatorGroup}
+                onCardClick={setSelectedIncident}
+                onQuickReassign={handleQuickReassign}
+              />
+
+              {/* Column 3: Высокий приоритет */}
+              <ColumnGroup
+                title="Высокий приоритет"
+                count={highPriorityGroup.length}
+                headerBg="bg-[#FFEDD5]"
+                headerTextClass="text-[#9A3412]"
+                badgeBg="bg-[#EA580C] text-white"
+                incidents={highPriorityGroup}
+                onCardClick={setSelectedIncident}
+                onQuickReassign={handleQuickReassign}
+              />
+
+              {/* Column 4: Диагностика */}
+              <ColumnGroup
+                title="Диагностика"
+                count={diagnosisGroup.length}
+                headerBg="bg-[#E0F2FE]"
+                headerTextClass="text-[#075985]"
+                badgeBg="bg-[#0284C7] text-white"
+                incidents={diagnosisGroup}
+                onCardClick={setSelectedIncident}
+                onQuickReassign={handleQuickReassign}
+              />
+            </div>
+          </main>
+        )}
+
+        {/* View 2: Сводка & Аналитика угроз (Фрейм ОБЗОР) */}
+        {viewMode === 'overview' && (
+          <main className="flex-1 overflow-y-auto pr-1">
+            <OverviewDashboard
+              stats={stats}
+              incidents={filteredIncidents}
+              onSelectIncident={setSelectedIncident}
+            />
+          </main>
+        )}
+
+        {/* View 3: Таблица инцидентов (Фрейм ЧерновикТАБЛИЦА) */}
+        {viewMode === 'table' && (
+          <main className="flex-1 overflow-y-auto pr-1">
+            <IncidentTableView
+              incidents={filteredIncidents}
+              onSelectIncident={setSelectedIncident}
+              onQuickReassign={handleQuickReassign}
+            />
+          </main>
+        )}
+      </div>
+
+      {/* Incident Detail Modal / Drawer (Figma "Детали инцидента") */}
       <IncidentDetailModal
         incident={selectedIncident}
         onClose={() => setSelectedIncident(null)}
         onUpdate={handleUpdateIncident}
+        teams={uniqueTeams}
       />
 
-      {/* Real-time Alerts */}
+      {/* Real-time Alerts Toasts */}
       <AlertToast alerts={alerts} onDismiss={handleDismissAlert} />
 
-      {/* Minimalist Collapsible Demo Trigger */}
+      {/* Live ITSM Simulation Panel */}
       <DemoPanel onRefresh={loadData} />
     </div>
   )

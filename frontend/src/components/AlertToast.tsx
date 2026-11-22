@@ -20,24 +20,24 @@ export const AlertToast: React.FC<AlertToastProps> = ({ alerts, onDismiss }) => 
   if (alerts.length === 0) return null
 
   return (
-    <div className="fixed top-16 right-6 z-50 space-y-2 max-w-md w-full pointer-events-none">
+    <div className="fixed top-16 right-6 z-50 space-y-2.5 max-w-sm w-full pointer-events-none select-none">
       {alerts.map((al, idx) => {
         const isCritical = al.type === 'CRITICAL_ALERT'
         const isCoordinator = al.type === 'COORDINATOR_ALERT'
         const isResolved = al.type === 'INCIDENT_RESOLVED'
 
-        let bg = 'bg-slate-900 border-slate-750 text-slate-100'
-        let icon = <AlertCircle className="h-5 w-5 text-blue-400 flex-shrink-0" />
+        let bg = 'bg-white border-slate-200 text-slate-800'
+        let icon = <AlertCircle className="h-5 w-5 text-blue-500 flex-shrink-0" />
 
         if (isCritical) {
-          bg = 'bg-red-950/95 border-red-600 text-white shadow-xl shadow-red-950/60 ring-1 ring-red-500 animate-bounce'
-          icon = <Flame className="h-5 w-5 text-red-400 flex-shrink-0" />
+          bg = 'bg-[#FFF5F5] border-red-200 text-slate-900 shadow-xl shadow-red-500/10 ring-1 ring-red-400'
+          icon = <Flame className="h-5 w-5 text-[#E30611] flex-shrink-0 animate-bounce" />
         } else if (isCoordinator) {
-          bg = 'bg-amber-950/95 border-amber-600 text-amber-50 shadow-xl shadow-amber-950/40 ring-1 ring-amber-500'
-          icon = <Users className="h-5 w-5 text-amber-400 flex-shrink-0" />
+          bg = 'bg-[#FFFBEB] border-amber-200 text-slate-900 shadow-xl shadow-amber-500/10'
+          icon = <Users className="h-5 w-5 text-amber-600 flex-shrink-0" />
         } else if (isResolved) {
-          bg = 'bg-emerald-950/95 border-emerald-600 text-emerald-50 shadow-xl shadow-emerald-950/40'
-          icon = <CheckCircle className="h-5 w-5 text-emerald-400 flex-shrink-0" />
+          bg = 'bg-[#F0FDF4] border-emerald-200 text-slate-900 shadow-xl shadow-emerald-500/10'
+          icon = <CheckCircle className="h-5 w-5 text-emerald-600 flex-shrink-0" />
         }
 
         return (
@@ -48,22 +48,24 @@ export const AlertToast: React.FC<AlertToastProps> = ({ alerts, onDismiss }) => 
             {icon}
             <div className="flex-1 text-xs">
               <div className="flex items-center justify-between mb-1">
-                <span className="font-bold uppercase tracking-wider text-[10px] opacity-80">
+                <span className="font-bold uppercase tracking-wider text-[10px] text-slate-500">
                   {isCritical
-                    ? 'Срочное оповещение'
+                    ? '🔥 Критическое оповещение'
                     : isCoordinator
-                    ? 'Назначение координатору'
+                    ? '👥 Назначение координатору'
                     : isResolved
-                    ? 'Инцидент решен'
+                    ? '✅ Инцидент решен'
                     : 'Событие дашборда'}
                 </span>
-                <span className="text-[10px] opacity-60">Только что</span>
+                <span className="text-[10px] text-slate-400">Только что</span>
               </div>
-              <p className="font-medium leading-snug">{al.message}</p>
+              <p className="font-medium text-slate-900 leading-snug">
+                {al.message}
+              </p>
             </div>
             <button
               onClick={() => onDismiss(idx)}
-              className="p-1 rounded-md opacity-60 hover:opacity-100 transition-opacity"
+              className="text-slate-400 hover:text-slate-700 p-0.5 rounded-lg transition-colors"
             >
               <X className="h-4 w-4" />
             </button>
