@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -143,15 +145,25 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	var updateData models.Incident
-	if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+	if err := json.Unmarshal(bodyBytes, &updateData); err != nil {
 		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	var rawMap map[string]interface{}
+	_ = json.Unmarshal(bodyBytes, &rawMap)
+
 	// Merge updates
 	oldGroup := existing.AssignedGroupName
 	oldState := existing.State
+	oldMessage := existing.Message
 
 	if updateData.State != "" {
 		existing.State = updateData.State
@@ -172,6 +184,9 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 	if updateData.Solution != "" {
 		existing.Solution = updateData.Solution
 	}
+	if _, hasMsg := rawMap["message"]; hasMsg {
+		existing.Message = updateData.Message
+	}
 
 	if err := h.db.UpsertIncident(existing); err != nil {
 		http.Error(w, "Database update error: "+err.Error(), http.StatusInternalServerError)
@@ -181,6 +196,18 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 	saved, _ := h.db.GetIncidentByID(id)
 
 	// Record audit events for changes
+	if _, hasMsg := rawMap["message"]; hasMsg && existing.Message != oldMessage {
+		if existing.Message != "" {
+			_ = h.db.RecordEvent(id, "HANDOVER_MESSAGE", "Сообщение координатору: "+existing.Message, map[string]string{
+				"from_team": oldGroup,
+				"message":   existing.Message,
+			})
+		} else {
+			_ = h.db.RecordEvent(id, "HANDOVER_MESSAGE_CLEARED", "Сообщение координатору очищено", map[string]string{
+				"cleared_by": oldGroup,
+			})
+		}
+	}
 	if existing.AssignedGroupName != oldGroup {
 		_ = h.db.RecordEvent(id, "REASSIGNED", "Перенаправлен в команду: "+existing.AssignedGroupName, map[string]string{
 			"from": oldGroup,
@@ -202,12 +229,17 @@ func (h *IncidentHandler) UpdateIncident(w http.ResponseWriter, r *http.Request)
 		h.sseHub.BroadcastEvent("CRITICAL_ALERT", saved, "🚨 Эскалация в КРИТИЧЕСКИЙ: "+saved.Header)
 	}
 	if saved.AssignedGroupName == "КЦ ИТ Координаторы Массовых Инцидентов" {
+		alertMsg := "👤 Передан координаторам: " + saved.ID
+		if saved.Message != "" {
+			alertMsg = fmt.Sprintf("📩 Возврат координаторам с сообщением: %s («%s»)", saved.ID, saved.Message)
+		}
 		_ = h.db.RecordEvent(saved.ID, "AI_ROUTING_RECOMMENDED", "ИИ рекомендовал передать в: "+saved.AIRoutingHint, map[string]any{
 			"recommended_group": saved.AIRoutingHint,
 			"confidence":        saved.AIRoutingConfidence,
 			"risk_score":        saved.AIRiskScore,
+			"handoff_message":   saved.Message,
 		})
-		h.sseHub.BroadcastEvent("COORDINATOR_ALERT", saved, "👤 Передан координаторам: "+saved.ID)
+		h.sseHub.BroadcastEvent("COORDINATOR_ALERT", saved, alertMsg)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Activity, Calendar, ChevronDown, Layers, Users, X } from 'lucide-react'
 
 interface ToolbarFiltersProps {
+  title?: string
   dateFilter: string
   onDateFilterChange: (val: string) => void
   productFilter: string
@@ -18,6 +19,7 @@ interface ToolbarFiltersProps {
 }
 
 export const ToolbarFilters: React.FC<ToolbarFiltersProps> = ({
+  title,
   dateFilter,
   onDateFilterChange,
   productFilter,
@@ -65,7 +67,7 @@ export const ToolbarFilters: React.FC<ToolbarFiltersProps> = ({
       {/* Title */}
       <div className="flex items-center gap-3">
         <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
-          Инциденты
+          {title || 'Инциденты'}
         </h1>
         {activeFiltersCount > 0 && (
           <button

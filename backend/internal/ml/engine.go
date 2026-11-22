@@ -197,6 +197,13 @@ func (e *Engine) evaluateRouting(inc *models.Incident) {
 	fullText := strings.ToLower(fmt.Sprintf("%s %s %s %s %s",
 		inc.ProductName, inc.Service, inc.ScenarioName, inc.Header, inc.Description))
 
+	msgText := strings.ToLower(strings.TrimSpace(inc.Message))
+	// When a handover message is provided by the previous team, it carries paramount importance
+	// for routing to the next required team. Repeat 6x in TF-IDF fullText to amplify term frequency.
+	if msgText != "" {
+		fullText = fmt.Sprintf("%s %s", fullText, strings.Repeat(msgText+" ", 6))
+	}
+
 	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(fullText, "(", " "), ")", " "))
 	vec := make([]float64, len(e.routingModel.IDF))
 
@@ -240,6 +247,57 @@ func (e *Engine) evaluateRouting(inc *models.Incident) {
 			}
 		}
 		scores[c] = score
+	}
+
+	// Heavy weight boosting for message keywords matching team capabilities
+	if msgText != "" {
+		teamKeywords := map[string][]string{
+			"КЦ ДОИ Администрирование SAN":             {"san", "схд", "диск", "дисков", "хранилищ", "storage", "лун", "lun", "raid", "полк", "hba", "fc"},
+			"КЦ ДОИ VMWare":                            {"vmware", "esxi", "vcenter", "виртуализ", "virtual", "hypervisor", "вм", "хост", "снапшот", "snapshot"},
+			"КЦ ТБ ДМиМС DC-NET Аварии":                {"dc-net", "сеть", "сетев", "маршрутиз", "маршрут", "коммутат", "свитч", "switch", "router", "bgp", "vlan", "стык", "транк", "канал", "шлюз"},
+			"КЦ ББ ДИБ УРМС VPN Support":               {"vpn", "доступ", "шлюз", "туннел", "ipsec", "сертификат", "безопасност", "чекпоинт", "checkpoint", "firewall", "фаервол"},
+			"КЦ ИТ Active Directory":                   {"active directory", "ad", "домен", "контроллер", "учетн", "kerberos", "ldap", "пользовател", "парол", "учетка"},
+			"КЦ ИТ Media L2 KION":                      {"kion", "кион", "видео", "стриминг", "media", "медиа", "плеер", "трансляц", "hls"},
+			"КЦ ИТ ЦП Billing Platform":                {"billing", "биллинг", "счет", "оплат", "платеж", "баланс", "начислен", "инвойс"},
+			"КЦ ИТ ЦРМП ОРМП Foris Аварии Тарификация": {"foris", "форис", "тарифик", "тариф", "абонент"},
+			"КЦ ИТ Allure TestOps Support":             {"allure", "testops", "аллюр", "тест", "автотест"},
+			"КЦ ИТ EP Product Catalog":                 {"catalog", "каталог", "ep product", "номенклатур", "продукт"},
+			"КЦ ИТ Мой МТС":                            {"мой мтс", "личный кабинет", "приложени"},
+			"КЦ ИТ ОРД МедиаСкаут":                     {"медиаскаут", "орд", "реклам"},
+			"КЦ ИТ Поддержка Membrana":                 {"membrana", "мембран"},
+			"КЦ ИТ Развитие DEVOPS":                    {"devops", "девопс", "gitlab", "pipeline", "ci/cd", "деплой", "kubernetes", "k8s", "кластер"},
+			"КЦ ИТ OPS Аварии MSCP":                    {"mscp", "мскп"},
+			"Дежурная смена ОГЭ МЦОД Санкт-Петербург":  {"мцод", "цод", "санкт-петербург", "спб", "питер", "питание", "охлаждение", "кондиционер", "дизель", "генератор", "стойк", "электро"},
+			"ОГЭ Приморье":                             {"приморье", "владивосток", "дфо"},
+			"КЦ МТС Гильдия (SimpleOne)":               {"simpleone", "симпл", "itsm"},
+		}
+
+		for c := 0; c < numClasses; c++ {
+			cls := e.routingModel.Classes[c]
+			clsLower := strings.ToLower(cls)
+
+			// Direct match with group name tokens
+			clsTokens := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(clsLower, "(", " "), ")", " "))
+			for _, tok := range clsTokens {
+				if len(tok) >= 3 && tok != "кц" && tok != "ит" && tok != "дои" && tok != "аварии" && strings.Contains(msgText, tok) {
+					scores[c] += 7.0
+				}
+			}
+
+			// Domain keyword matches
+			if kws, ok := teamKeywords[cls]; ok {
+				matchCount := 0
+				for _, kw := range kws {
+					if strings.Contains(msgText, kw) {
+						matchCount++
+					}
+				}
+				if matchCount > 0 {
+					// Heavy weight amplification: each match adds +7.0 to logit score
+					scores[c] += float64(matchCount) * 7.5
+				}
+			}
+		}
 	}
 
 	// Softmax
@@ -287,8 +345,11 @@ func (e *Engine) evaluateRouting(inc *models.Incident) {
 				break
 			}
 		}
-		if conf > 98.0 {
-			conf = 98.0
+		if msgText != "" {
+			conf = math.Max(conf, 94.0 + math.Min(candidates[0].prob*0.05, 5.0))
+		}
+		if conf > 99.0 {
+			conf = 99.0
 		}
 		inc.AIRoutingConfidence = math.Round(conf*10) / 10
 
@@ -296,6 +357,7 @@ func (e *Engine) evaluateRouting(inc *models.Incident) {
 		if len(candidates) < topCount {
 			topCount = len(candidates)
 		}
+		inc.AIRoutingTop = nil
 		for i := 0; i < topCount; i++ {
 			inc.AIRoutingTop = append(inc.AIRoutingTop, models.GroupScore{
 				Group:      candidates[i].group,

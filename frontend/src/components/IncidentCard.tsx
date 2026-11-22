@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Clock,
+  MessageSquare,
   Sparkles,
   Users,
 } from 'lucide-react'
@@ -78,6 +79,7 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
       ? incident.aiSlaRisk
       : Math.min(99, Math.round((incident.aiRiskScore || 25) * 0.85))
   )
+  const avgRisk = Math.round((escalationRisk + slaRisk) / 2)
 
   const getRiskColor = (score: number) => {
     if (score >= 70) return 'text-[#E30611]'
@@ -147,7 +149,30 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({
               </strong>
             </span>
           </div>
+
+          {/* Average Risk (Ср. риск) */}
+          <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+            <span className="text-slate-500 font-medium text-[11px]">
+              Ср. риск:
+            </span>
+            <strong className={`font-bold text-xs ${getRiskColor(avgRisk)}`}>
+              {avgRisk}%
+            </strong>
+          </div>
         </div>
+
+        {/* Handover message from team (if present) */}
+        {incident.message && (
+          <div className="mb-2.5 p-2 rounded-lg bg-amber-50/90 border border-amber-200 text-[11px] leading-snug">
+            <div className="flex items-center gap-1 font-semibold text-amber-900 mb-0.5">
+              <MessageSquare className="h-3 w-3 text-amber-600 flex-shrink-0" />
+              <span>Сообщение координатору:</span>
+            </div>
+            <p className="line-clamp-2 text-slate-700 italic">
+              «{incident.message}»
+            </p>
+          </div>
+        )}
 
         {/* AI Recommendation hint (if different group suggested) */}
         {incident.aiRoutingHint &&

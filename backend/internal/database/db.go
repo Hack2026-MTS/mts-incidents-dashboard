@@ -56,6 +56,9 @@ func (db *DB) InitSchema(schemaPath string) error {
 		return fmt.Errorf("failed to execute schema: %w", err)
 	}
 
+	// Ensure message column exists in case DB was previously created
+	_, _ = db.Conn.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS message TEXT DEFAULT '';")
+
 	log.Println("[DB] Schema initialized successfully")
 	return nil
 }
@@ -98,7 +101,7 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			header, description, short_description, assigned_group_name,
 			assigned_employee, assigned_employee_login, initiator_name, initiator_login,
 			priority_id, priority, urgency_id, urgency, impact_id, impact,
-			product_name, product_master_id, service, scenario_name, solution,
+			product_name, product_master_id, service, scenario_name, solution, message,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
 			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
 			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes, updated_at
@@ -108,10 +111,10 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			$11, $12, $13, $14,
 			$15, $16, $17, $18,
 			$19, $20, $21, $22, $23, $24,
-			$25, $26, $27, $28, $29,
-			$30, $31, $32, $33, $34, $35,
-			$36, $37, $38, $39,
-			$40, $41, $42, $43, NOW()
+			$25, $26, $27, $28, $29, $30,
+			$31, $32, $33, $34, $35, $36,
+			$37, $38, $39, $40,
+			$41, $42, $43, $44, NOW()
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			state = EXCLUDED.state,
@@ -135,6 +138,7 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 			impact = EXCLUDED.impact,
 			product_name = EXCLUDED.product_name,
 			solution = EXCLUDED.solution,
+			message = EXCLUDED.message,
 			ai_risk_score = EXCLUDED.ai_risk_score,
 			ai_risk_level = EXCLUDED.ai_risk_level,
 			ai_routing_hint = EXCLUDED.ai_routing_hint,
@@ -153,7 +157,7 @@ func (db *DB) UpsertIncident(inc *models.Incident) error {
 		inc.Header, inc.Description, inc.ShortDescription, inc.AssignedGroupName,
 		inc.AssignedEmployee, inc.AssignedEmployeeLogin, inc.InitiatorName, inc.InitiatorLogin,
 		inc.PriorityID, inc.Priority, inc.UrgencyID, inc.Urgency, inc.ImpactID, inc.Impact,
-		inc.ProductName, inc.ProductMasterID, inc.Service, inc.ScenarioName, inc.Solution,
+		inc.ProductName, inc.ProductMasterID, inc.Service, inc.ScenarioName, inc.Solution, inc.Message,
 		inc.ServiceType, inc.ServiceTypeID, inc.IsEffect, inc.IsReason, inc.IsDouble, inc.IsMaster,
 		inc.AIRiskScore, inc.AIRiskLevel, inc.AIRoutingHint, inc.AIRoutingConfidence,
 		inc.AISLARisk, inc.AISLALevel, inc.AITeamWorkload, inc.AIEstimatedMinutes,
@@ -172,13 +176,13 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 			header, description, short_description, assigned_group_name,
 			assigned_employee, assigned_employee_login, initiator_name, initiator_login,
 			priority_id, priority, urgency_id, urgency, impact_id, impact,
-			product_name, product_master_id, service, scenario_name, solution,
+			product_name, product_master_id, service, scenario_name, solution, message,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
 			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
 			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes,
 			created_at, updated_at
 		FROM incidents
-		ORDER BY priority_id DESC, ai_risk_score DESC, updated_at DESC
+		ORDER BY ((COALESCE(ai_sla_risk, 0) + COALESCE(ai_risk_score, 0)) / 2.0) DESC, priority_id DESC, updated_at DESC
 	`
 
 	rows, err := db.Conn.Query(query)
@@ -192,7 +196,7 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 		var inc models.Incident
 		var submitDate, deadline, completionDate, lastAssignment *time.Time
 		var sysID, stateReason, shortDesc, emp, empLogin, initName, initLogin sql.NullString
-		var prodName, prodMaster, srv, scen, sol, srvType sql.NullString
+		var prodName, prodMaster, srv, scen, sol, msg, srvType sql.NullString
 
 		err := rows.Scan(
 			&inc.ID, &sysID, &inc.State, &inc.StateEnum, &inc.StateID, &stateReason,
@@ -200,7 +204,7 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 			&inc.Header, &inc.Description, &shortDesc, &inc.AssignedGroupName,
 			&emp, &empLogin, &initName, &initLogin,
 			&inc.PriorityID, &inc.Priority, &inc.UrgencyID, &inc.Urgency, &inc.ImpactID, &inc.Impact,
-			&prodName, &prodMaster, &srv, &scen, &sol,
+			&prodName, &prodMaster, &srv, &scen, &sol, &msg,
 			&srvType, &inc.ServiceTypeID, &inc.IsEffect, &inc.IsReason, &inc.IsDouble, &inc.IsMaster,
 			&inc.AIRiskScore, &inc.AIRiskLevel, &inc.AIRoutingHint, &inc.AIRoutingConfidence,
 			&inc.AISLARisk, &inc.AISLALevel, &inc.AITeamWorkload, &inc.AIEstimatedMinutes,
@@ -222,6 +226,7 @@ func (db *DB) GetIncidents() ([]*models.Incident, error) {
 		inc.Service = srv.String
 		inc.ScenarioName = scen.String
 		inc.Solution = sol.String
+		inc.Message = msg.String
 		inc.ServiceType = srvType.String
 
 		inc.SubmitDate = submitDate
@@ -248,7 +253,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 			header, description, short_description, assigned_group_name,
 			assigned_employee, assigned_employee_login, initiator_name, initiator_login,
 			priority_id, priority, urgency_id, urgency, impact_id, impact,
-			product_name, product_master_id, service, scenario_name, solution,
+			product_name, product_master_id, service, scenario_name, solution, message,
 			service_type, service_type_id, is_effect, is_reason, is_double, is_master,
 			ai_risk_score, ai_risk_level, ai_routing_hint, ai_routing_confidence,
 			ai_sla_risk, ai_sla_level, ai_team_workload, ai_estimated_minutes,
@@ -261,7 +266,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 	var inc models.Incident
 	var submitDate, deadline, completionDate, lastAssignment *time.Time
 	var sysID, stateReason, shortDesc, emp, empLogin, initName, initLogin sql.NullString
-	var prodName, prodMaster, srv, scen, sol, srvType sql.NullString
+	var prodName, prodMaster, srv, scen, sol, msg, srvType sql.NullString
 
 	err := row.Scan(
 		&inc.ID, &sysID, &inc.State, &inc.StateEnum, &inc.StateID, &stateReason,
@@ -269,7 +274,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 		&inc.Header, &inc.Description, &shortDesc, &inc.AssignedGroupName,
 		&emp, &empLogin, &initName, &initLogin,
 		&inc.PriorityID, &inc.Priority, &inc.UrgencyID, &inc.Urgency, &inc.ImpactID, &inc.Impact,
-		&prodName, &prodMaster, &srv, &scen, &sol,
+		&prodName, &prodMaster, &srv, &scen, &sol, &msg,
 		&srvType, &inc.ServiceTypeID, &inc.IsEffect, &inc.IsReason, &inc.IsDouble, &inc.IsMaster,
 		&inc.AIRiskScore, &inc.AIRiskLevel, &inc.AIRoutingHint, &inc.AIRoutingConfidence,
 		&inc.AISLARisk, &inc.AISLALevel, &inc.AITeamWorkload, &inc.AIEstimatedMinutes,
@@ -291,6 +296,7 @@ func (db *DB) GetIncidentByID(id string) (*models.Incident, error) {
 	inc.Service = srv.String
 	inc.ScenarioName = scen.String
 	inc.Solution = sol.String
+	inc.Message = msg.String
 	inc.ServiceType = srvType.String
 
 	inc.SubmitDate = submitDate

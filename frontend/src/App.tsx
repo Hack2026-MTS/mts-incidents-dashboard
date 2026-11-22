@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { Menu } from 'lucide-react'
-import { AlertToast } from './components/AlertToast'
+import { SlaBreachColumn } from './components/SlaBreachColumn'
 import { ColumnGroup } from './components/ColumnGroup'
 import { DemoPanel } from './components/DemoPanel'
-import { EmergencyAlertBanner } from './components/EmergencyAlertBanner'
+import { EmergencyAlertBanner, type EmergencyAlertItem } from './components/EmergencyAlertBanner'
 import { Header } from './components/Header'
 import { IncidentDetailModal } from './components/IncidentDetailModal'
 import { IncidentTableView } from './components/IncidentTableView'
@@ -29,8 +29,37 @@ export function App() {
   const [connected, setConnected] = useState(false)
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
-  const [toasts, setToasts] = useState<NotificationItem[]>([])
-  const [emergencyBannerDismissed, setEmergencyBannerDismissed] = useState(false)
+  const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlertItem[]>([])
+  const hasInitialAlertsLoaded = useRef(false)
+
+  const addEmergencyAlert = useCallback((inc: Incident) => {
+    setEmergencyAlerts((prev) => {
+      const existingIdx = prev.findIndex((a) => a.id === inc.id)
+      if (existingIdx !== -1) {
+        const next = [...prev]
+        next[existingIdx] = { ...next[existingIdx], incident: inc, appearedAt: Date.now() }
+        return next
+      }
+      // Максимум 6 уведомлений: 2 столбца по 3 штуки
+      if (prev.length < 6) {
+        return [...prev, { id: inc.id, incident: inc, appearedAt: Date.now() }]
+      }
+      // Если 6 или больше, вытесняем самое старое уведомление (минимальный appearedAt)
+      const currentAlerts = prev.slice(0, 6)
+      let oldestIdx = 0
+      for (let i = 1; i < currentAlerts.length; i++) {
+        if (currentAlerts[i].appearedAt < currentAlerts[oldestIdx].appearedAt) {
+          oldestIdx = i
+        }
+      }
+      const withoutOldest = currentAlerts.filter((_, idx) => idx !== oldestIdx)
+      return [...withoutOldest, { id: inc.id, incident: inc, appearedAt: Date.now() }]
+    })
+  }, [])
+
+  const handleDismissEmergencyAlert = useCallback((id: string) => {
+    setEmergencyAlerts((prev) => prev.filter((a) => a.id !== id))
+  }, [])
 
   const addNotification = useCallback((
     type: NotificationItem['type'],
@@ -48,7 +77,6 @@ export function App() {
       incidentId,
     }
     setNotifications((prev) => [item, ...prev.slice(0, 49)])
-    setToasts((prev) => [item, ...prev.slice(0, 2)])
   }, [])
 
   const loadData = async () => {
@@ -56,6 +84,34 @@ export function App() {
       const [incList, statsData] = await Promise.all([getIncidents(), getStats()])
       setIncidents(incList)
       setStats(statsData)
+
+      // Первичная загрузка: до 6 активных критических инцидентов (2 столбца по 3)
+      if (!hasInitialAlertsLoaded.current) {
+        hasInitialAlertsLoaded.current = true
+        const criticals = incList.filter(
+          (i) =>
+            (i.priorityId === 4 || i.priority === 'Наивысший' || i.priority === 'Критический') &&
+            i.state !== 'Завершен' &&
+            i.state !== 'Закрыт'
+        )
+        if (criticals.length > 0) {
+          setEmergencyAlerts(
+            criticals.slice(0, 6).map((inc) => ({
+              id: inc.id,
+              incident: inc,
+              appearedAt: Date.now(),
+            }))
+          )
+        }
+      } else {
+        // Очистка уведомлений, если инцидент завершен/закрыт
+        setEmergencyAlerts((prev) =>
+          prev.filter((a) => {
+            const found = incList.find((i) => i.id === a.id)
+            return !found || (found.state !== 'Завершен' && found.state !== 'Закрыт')
+          })
+        )
+      }
     } catch (e) {
       console.error('Failed to load dashboard data:', e)
     }
@@ -96,18 +152,34 @@ export function App() {
 
       if (msg.type === 'CRITICAL_ALERT') {
         soundAlert.playCriticalAlert()
-        setEmergencyBannerDismissed(false)
         addNotification('CRITICAL_ALERT', '🔥 Критический инцидент', msg.message, incId)
+        if (msg.incident) {
+          addEmergencyAlert(msg.incident)
+        } else if (incId) {
+          getIncidentById(incId).then((inc) => {
+            if (inc) addEmergencyAlert(inc)
+          }).catch(() => {})
+        }
       } else if (msg.type === 'COORDINATOR_ALERT') {
         soundAlert.playCoordinatorAlert()
         addNotification('COORDINATOR_ALERT', '👥 Назначение координатору', msg.message, incId)
       } else if (msg.type === 'INCIDENT_RESOLVED') {
         soundAlert.playResolvedAlert()
         addNotification('INCIDENT_RESOLVED', '✅ Инцидент решен', msg.message, incId)
+        if (incId) {
+          handleDismissEmergencyAlert(incId)
+        }
       } else if (msg.type === 'INCIDENT_UPDATED') {
         addNotification('INCIDENT_UPDATED', 'Обновление инцидента', msg.message, incId)
+        if (msg.incident && (msg.incident.priorityId === 4 || msg.incident.priority === 'Наивысший' || msg.incident.priority === 'Критический')) {
+          if (msg.incident.state !== 'Завершен' && msg.incident.state !== 'Закрыт') {
+            addEmergencyAlert(msg.incident)
+          } else {
+            handleDismissEmergencyAlert(msg.incident.id)
+          }
+        }
       } else if (msg.type === 'DASHBOARD_RESET') {
-        setEmergencyBannerDismissed(false)
+        hasInitialAlertsLoaded.current = false
         addNotification('INFO', 'Сброс дашборда', 'Дашборд сброшен к исходным данным')
       }
 
@@ -119,11 +191,7 @@ export function App() {
       unsubMessages()
       sseService.disconnect()
     }
-  }, [addNotification])
-
-  const handleDismissToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }
+  }, [addNotification, addEmergencyAlert, handleDismissEmergencyAlert])
 
   const handleToggleSound = () => {
     const next = !soundEnabled
@@ -280,14 +348,19 @@ export function App() {
     setSearch('')
   }
 
-  // Stable sort helper so cards never jump or swap unexpectedly
+  // Сортировка по среднему (% срыва SLA + % эскалации)
   const stableSort = (cards: Incident[]) => {
     return [...cards].sort((a, b) => {
-      if ((b.priorityId || 0) !== (a.priorityId || 0)) {
-        return (b.priorityId || 0) - (a.priorityId || 0)
-      }
-      if ((b.aiRiskScore || 0) !== (a.aiRiskScore || 0)) {
-        return (b.aiRiskScore || 0) - (a.aiRiskScore || 0)
+      const slaA = a.aiSlaRisk !== undefined ? a.aiSlaRisk : Math.min(99, (a.aiRiskScore || 25) * 0.85)
+      const escA = a.aiRiskScore || 0
+      const avgA = (slaA + escA) / 2
+
+      const slaB = b.aiSlaRisk !== undefined ? b.aiSlaRisk : Math.min(99, (b.aiRiskScore || 25) * 0.85)
+      const escB = b.aiRiskScore || 0
+      const avgB = (slaB + escB) / 2
+
+      if (avgB !== avgA) {
+        return avgB - avgA // По убыванию среднего риска
       }
       return (b.id || '').localeCompare(a.id || '')
     })
@@ -352,19 +425,26 @@ export function App() {
     return stableSort(list)
   }, [filteredIncidents, statusFilter])
 
-  // Critical incident for emergency banner (from Figma АРТЕМ Уведомление)
-  // Evaluated across ALL incidents so global critical emergency alerts are never hidden by local filters!
-  const activeCriticalIncident = useMemo(() => {
-    if (emergencyBannerDismissed) return null
-    return (
-      incidents.find(
-        (i) =>
-          (i.priorityId === 4 || i.priority === 'Наивысший' || i.priority === 'Критический') &&
-          i.state !== 'Завершен' &&
-          i.state !== 'Закрыт'
-      ) || null
-    )
-  }, [incidents, emergencyBannerDismissed])
+  // 5. Просрочен SLA (уведомления если срок SLA какого-либо инцидента просрочен)
+  const slaOverdueGroup = useMemo(() => {
+    const now = Date.now()
+    const list = filteredIncidents.filter((inc) => {
+      if (inc.state === 'Завершен' || inc.state === 'Закрыт') return false
+      if (!inc.deadline) return false
+      const deadlineTime = new Date(inc.deadline).getTime()
+      return deadlineTime < now
+    })
+    return list.sort((a, b) => {
+      const deadA = a.deadline ? new Date(a.deadline).getTime() : 0
+      const deadB = b.deadline ? new Date(b.deadline).getTime() : 0
+      if (deadA !== deadB) {
+        return deadA - deadB // Сначала наиболее давно просроченные
+      }
+      const avgA = ((a.aiSlaRisk ?? 100) + (a.aiRiskScore ?? 0)) / 2
+      const avgB = ((b.aiSlaRisk ?? 100) + (b.aiRiskScore ?? 0)) / 2
+      return avgB - avgA
+    })
+  }, [filteredIncidents])
 
   return (
     <div className="h-screen w-screen bg-[#F8FAFC] text-slate-900 flex flex-col overflow-hidden font-sans select-none antialiased">
@@ -426,17 +506,18 @@ export function App() {
 
         {/* Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden px-4 md:px-6 pt-3 pb-3">
-          {/* Emergency Alert Banner (Figma "АРТЕМ Уведомление") */}
+          {/* Emergency Alert Banners (Max 6: 2 столбца по 3 штуки, замена самого старого) */}
           <EmergencyAlertBanner
-            incident={activeCriticalIncident}
+            alerts={emergencyAlerts}
             onOpen={setSelectedIncident}
-            onDismiss={() => setEmergencyBannerDismissed(true)}
+            onDismiss={handleDismissEmergencyAlert}
           />
 
           {/* Toolbar & Filter Bar (shown in kanban and table views) */}
           {viewMode !== 'overview' && (
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-2.5 border-b border-slate-200/80 mb-3 flex-shrink-0">
               <ToolbarFilters
+                title={viewMode === 'table' ? 'Отчет по инцидентам' : 'Инциденты'}
                 dateFilter={dateFilter}
                 onDateFilterChange={setDateFilter}
                 productFilter={productFilter}
@@ -454,10 +535,10 @@ export function App() {
             </div>
           )}
 
-        {/* View 1: 02 — Dashboard Redesign (4 Columns Kanban) */}
+        {/* View 1: 02 — Dashboard Redesign (5 Columns: 4 Process Columns + 1 SLA Overdue Notifications Column) */}
         {viewMode === 'kanban' && (
           <main className="flex-1 overflow-hidden">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 h-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 h-full">
               {/* Column 1: Критические */}
               <ColumnGroup
                 title="Критические"
@@ -494,14 +575,21 @@ export function App() {
                 onQuickReassign={handleQuickReassign}
               />
 
-              {/* Column 4: Диагностика */}
+              {/* Column 4: Исследование ситуации */}
               <ColumnGroup
-                title="Диагностика"
+                title="Исследование ситуации"
                 count={diagnosisGroup.length}
                 headerBg="bg-[#E0F2FE]"
                 headerTextClass="text-[#075985]"
                 badgeBg="bg-[#0284C7] text-white"
                 incidents={diagnosisGroup}
+                onCardClick={setSelectedIncident}
+                onQuickReassign={handleQuickReassign}
+              />
+
+              {/* Column 5: Просрочен SLA (Уведомления) */}
+              <SlaBreachColumn
+                incidents={slaOverdueGroup}
                 onCardClick={setSelectedIncident}
                 onQuickReassign={handleQuickReassign}
               />
@@ -524,7 +612,7 @@ export function App() {
         {viewMode === 'table' && (
           <main className="flex-1 overflow-y-auto pr-1">
             <IncidentTableView
-              incidents={filteredIncidents}
+              incidents={stableSort(filteredIncidents)}
               onSelectIncident={setSelectedIncident}
               onQuickReassign={handleQuickReassign}
             />
@@ -539,13 +627,6 @@ export function App() {
         onClose={() => setSelectedIncident(null)}
         onUpdate={handleUpdateIncident}
         teams={uniqueTeams}
-      />
-
-      {/* Real-time Alerts Toasts */}
-      <AlertToast
-        toasts={toasts}
-        onDismiss={handleDismissToast}
-        onSelectIncidentById={handleSelectIncidentById}
       />
 
       {/* Live ITSM Simulation Panel */}

@@ -52,6 +52,7 @@ type Incident struct {
 	EliminationTypeID           string     `json:"eliminationTypeId,omitempty"`
 	ReceivingChannel            string     `json:"receivingChannel,omitempty"`
 	Solution                    string     `json:"solution,omitempty"`
+	Message                     string     `json:"message"`
 
 	// AI Enrichments
 	AIRiskScore         float64      `json:"aiRiskScore"`

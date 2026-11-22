@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     service TEXT,
     scenario_name TEXT,
     solution TEXT,
+    message TEXT DEFAULT '',
     service_type TEXT DEFAULT 'Технологический',
     service_type_id INT DEFAULT 30,
     is_effect BOOLEAN DEFAULT FALSE,

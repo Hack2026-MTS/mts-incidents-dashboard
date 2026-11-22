@@ -3,10 +3,12 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  CornerUpLeft,
   Layers,
   FileText,
   History,
   Link as LinkIcon,
+  MessageSquare,
   Save,
   Sparkles,
   Target,
@@ -28,12 +30,11 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
   onUpdate,
   teams = [],
 }) => {
-  if (!incident) return null
-
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'related'>('overview')
-  const [state, setState] = useState(incident.state === 'В работе' ? 'Выполняется' : (incident.state || 'Назначен'))
-  const [assignedGroup, setAssignedGroup] = useState(incident.assignedGroupName || '')
-  const [solution, setSolution] = useState(incident.solution || '')
+  const [state, setState] = useState(incident?.state === 'В работе' ? 'Выполняется' : (incident?.state || 'Назначен'))
+  const [assignedGroup, setAssignedGroup] = useState(incident?.assignedGroupName || '')
+  const [solution, setSolution] = useState(incident?.solution || '')
+  const [message, setMessage] = useState(incident?.message || '')
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
 
@@ -57,14 +58,17 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
 
   // Sync state when incident changes
   useEffect(() => {
+    if (!incident) return
     setState(incident.state === 'В работе' ? 'Выполняется' : (incident.state || 'Назначен'))
     setAssignedGroup(incident.assignedGroupName || '')
     setSolution(incident.solution || '')
+    setMessage(incident.message || '')
     setSaveSuccess(false)
   }, [incident])
 
   // Load audit events whenever modal opens or tab switches
   useEffect(() => {
+    if (!incident?.id) return
     let isMounted = true
     const loadEvents = async () => {
       setLoadingEvents(true)
@@ -83,15 +87,17 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     return () => {
       isMounted = false
     }
-  }, [incident.id])
+  }, [incident?.id])
 
   const handleSave = async () => {
+    if (!incident) return
     setIsSaving(true)
     try {
       await onUpdate(incident.id, {
         state,
         assignedGroupName: assignedGroup,
         solution,
+        message,
       })
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
@@ -102,7 +108,30 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     }
   }
 
+  const handleReturnToCoordinator = async () => {
+    if (!incident) return
+    setIsSaving(true)
+    const coordGroup = 'КЦ ИТ Координаторы Массовых Инцидентов'
+    setAssignedGroup(coordGroup)
+    setState('Назначен')
+    try {
+      await onUpdate(incident.id, {
+        state: 'Назначен',
+        assignedGroupName: coordGroup,
+        message,
+        solution,
+      })
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 3000)
+    } catch (e) {
+      console.error('Failed to return incident to coordinator:', e)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const applyRecommendedGroup = async (groupName: string) => {
+    if (!incident) return
     setAssignedGroup(groupName)
     setIsSaving(true)
     try {
@@ -134,6 +163,7 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
 
   // Priority chip styling
   const getPriorityBadge = () => {
+    if (!incident) return null
     if (incident.priorityId === 4 || incident.priority === 'Наивысший' || incident.priority === 'Критический') {
       return <span className="bg-[#E30611] text-white text-xs font-bold px-3 py-1 rounded-full">Критический</span>
     }
@@ -146,15 +176,11 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     return <span className="bg-[#3B82F6] text-white text-xs font-bold px-3 py-1 rounded-full">Низкий</span>
   }
 
-  // Risk scores
-  const escalationRisk = Math.round(incident.aiRiskScore || 79.4)
-  const slaRisk = Math.round(incident.aiSlaRisk !== undefined ? incident.aiSlaRisk : 0)
-
   // Teams list
   const availableTeams = useMemo(() => {
     const set = new Set<string>()
-    if (incident.assignedGroupName) set.add(incident.assignedGroupName)
-    if (incident.aiRoutingHint) set.add(incident.aiRoutingHint)
+    if (incident?.assignedGroupName) set.add(incident.assignedGroupName)
+    if (incident?.aiRoutingHint) set.add(incident.aiRoutingHint)
     teams.forEach((t) => t && set.add(t))
     // Standard MTS teams if list is short
     if (set.size < 5) {
@@ -166,6 +192,12 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     return Array.from(set)
   }, [teams, incident])
 
+  if (!incident) return null
+
+  // Risk scores
+  const escalationRisk = Math.round(incident.aiRiskScore || 79.4)
+  const slaRisk = Math.round(incident.aiSlaRisk !== undefined ? incident.aiSlaRisk : 0)
+
   const alternativeTeam = availableTeams.find(
     (t) => t !== (incident.aiRoutingHint || incident.assignedGroupName) && t !== 'КЦ ИТ Координаторы Массовых Инцидентов'
   ) || 'КЦ МТС Гильдия'
@@ -174,21 +206,27 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/45 backdrop-blur-xs select-none">
       <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-6xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-              Инцидент #{incident.id}
-            </h2>
-            {getPriorityBadge()}
-            {saveSuccess && (
-              <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Сохранено
-              </span>
-            )}
+        <div className="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight leading-snug">
+                {incident.header || incident.shortDescription || incident.id}
+              </h2>
+              {getPriorityBadge()}
+              {saveSuccess && (
+                <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-in fade-in">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Сохранено
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs font-mono font-medium text-slate-400">
+              {incident.id}
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0 mt-0.5"
+            title="Закрыть"
           >
             <X className="h-5 w-5" />
           </button>
@@ -357,8 +395,48 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                       </select>
                     </div>
 
-                    {/* Save Button */}
-                    <div className="flex justify-end pt-2">
+                    {/* Сообщение координатору / Необходимые действия */}
+                    <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-slate-800 font-bold text-xs flex items-center gap-1.5">
+                          <MessageSquare className="h-3.5 w-3.5 text-amber-600" />
+                          <span>Сообщение для координатора (необходимые действия)</span>
+                        </label>
+                        {message && (
+                          <button
+                            type="button"
+                            onClick={() => setMessage('')}
+                            className="text-[10px] text-slate-400 hover:text-red-500 transition-colors"
+                          >
+                            Очистить
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        placeholder="Опишите выполненную работу и требуемые действия смежной команды (напр.: «Необходимо настроить дисковые массивы SAN...»)"
+                        rows={3}
+                        className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#E30611] transition-all resize-none leading-relaxed"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Данное сообщение имеет максимальный вес в нейросети для перенаправления инцидента на нужную команду.
+                      </p>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={handleReturnToCoordinator}
+                        disabled={isSaving}
+                        className="bg-amber-500 hover:bg-amber-600 text-white font-semibold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                        title="Назначить на координатора с сообщением о необходимых действиях"
+                      >
+                        <CornerUpLeft className="h-3.5 w-3.5" />
+                        <span>Вернуть координатору</span>
+                      </button>
+
                       <button
                         onClick={handleSave}
                         disabled={isSaving}
@@ -444,6 +522,23 @@ export const IncidentDetailModal: React.FC<IncidentDetailModalProps> = ({
                     <Sparkles className="h-4 w-4 text-purple-600" />
                     <span>Маршрутизация (ML)</span>
                   </div>
+
+                  {/* Team Message Factor Highlight */}
+                  {incident.message && (
+                    <div className="p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-950 text-xs space-y-1.5 shadow-2xs">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-900 text-xs">
+                        <MessageSquare className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                        <span>Учтено сообщение команды:</span>
+                      </div>
+                      <p className="bg-white/80 rounded-lg p-2 border border-amber-200/60 text-slate-800 italic leading-snug text-[11px]">
+                        «{incident.message}»
+                      </p>
+                      <p className="text-[10px] text-amber-800 font-medium">
+                        Нейросеть проанализировала указанные действия и перенаправила рекомендацию с приоритетом на требуемую команду ({Math.round(incident.aiRoutingConfidence || 99)}%).
+                      </p>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-slate-500 leading-snug">
                     Рекомендованная команда на основе классификации:
                   </p>
